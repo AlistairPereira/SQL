@@ -5,6 +5,190 @@ select * from payments;
 select * from assessments;
 select * from courses;
 
+CREATE TABLE Students (
+  student_id INT PRIMARY KEY,
+  name VARCHAR(50),
+  city VARCHAR(50),
+  join_date DATE
+);
+
+CREATE TABLE Instructors (
+  instructor_id INT PRIMARY KEY,
+  name VARCHAR(50),
+  expertise VARCHAR(50)
+);
+
+CREATE TABLE Courses (
+  course_id INT PRIMARY KEY,
+  title VARCHAR(100),
+  category VARCHAR(50),
+  price DECIMAL(8,2),
+  instructor_id INT,
+  FOREIGN KEY (instructor_id) REFERENCES Instructors(instructor_id)
+);
+
+CREATE TABLE Enrollments (
+  enrollment_id INT PRIMARY KEY,
+  student_id INT,
+  course_id INT,
+  enroll_date DATE,
+  status VARCHAR(20),
+  FOREIGN KEY (student_id) REFERENCES Students(student_id),
+  FOREIGN KEY (course_id) REFERENCES Courses(course_id)
+);
+
+CREATE TABLE Assessments (
+  assessment_id INT PRIMARY KEY,
+  student_id INT,
+  course_id INT,
+  score DECIMAL(5,2),
+  date_taken DATE,
+  FOREIGN KEY (student_id) REFERENCES Students(student_id),
+  FOREIGN KEY (course_id) REFERENCES Courses(course_id)
+);
+
+CREATE TABLE Payments (
+  payment_id INT PRIMARY KEY,
+  student_id INT,
+  course_id INT,
+  amount_paid DECIMAL(8,2),
+  payment_date DATE,
+  FOREIGN KEY (student_id) REFERENCES Students(student_id),
+  FOREIGN KEY (course_id) REFERENCES Courses(course_id)
+);
+
+INSERT INTO Students (student_id, name, city, join_date) VALUES
+(1, 'Alice', 'Berlin', '2022-01-24'),
+(2, 'Bob', 'Frankfurt', '2022-04-08'),
+(3, 'Clara', 'Munich', '2022-12-04'),
+(4, 'David', 'Stuttgart', '2022-02-19'),
+(5, 'Eva', 'Hamburg', '2022-01-01'),
+(6, 'Frank', 'Berlin', '2022-04-08'),
+(7, 'Grace', 'Stuttgart', '2022-10-01'),
+(8, 'Hank', 'Stuttgart', '2022-04-23'),
+(9, 'Ivy', 'Stuttgart', '2022-07-08'),
+(10, 'Jack', 'Hamburg', '2022-10-09'),
+(11, 'Kara', 'Berlin', '2022-03-23'),
+(12, 'Liam', 'Hamburg', '2022-06-09'),
+(13, 'Mona', 'Munich', '2022-04-25'),
+(14, 'Nina', 'Frankfurt', '2022-02-03'),
+(15, 'Oscar', 'Hamburg', '2022-02-12');
+
+INSERT INTO Instructors (instructor_id, name, expertise) VALUES
+(101, 'Prof. Smith', 'Data Science'),
+(102, 'Dr. Allen', 'Web Development'),
+(103, 'Ms. Jain', 'Cloud Computing');
+
+INSERT INTO Courses (course_id, title, category, price, instructor_id) VALUES
+(1001, 'Intro to Python', 'Programming', 177.12, 103),
+(1002, 'React & Redux', 'Frontend', 140.56, 101),
+(1003, 'AWS for Beginners', 'Cloud', 171.07, 102),
+(1004, 'ML with Python', 'Data Science', 159.46, 103),
+(1005, 'Advanced SQL', 'Databases', 130.43, 101),
+(1006, 'Docker & Kubernetes', 'DevOps', 195.97, 102),
+(1007, 'JavaScript Mastery', 'Frontend', 106.78, 103),
+(1008, 'Deep Learning', 'AI', 132.81, 101);
+
+INSERT INTO Enrollments (enrollment_id, student_id, course_id, enroll_date, status) VALUES
+(501, 1, 1006, '2023-01-02', 'dropped'),
+(502, 1, 1005, '2023-02-25', NULL),
+(503, 1, 1002, '2023-01-28', 'in-progress'),
+(504, 2, 1002, '2023-03-15', NULL),
+(505, 3, 1006, '2023-02-22', 'in-progress'),
+(506, 3, 1002, '2023-06-22', 'in-progress'),
+(507, 3, 1003, '2023-01-20', 'dropped'),
+(508, 4, 1003, '2023-02-15', 'completed'),
+(509, 4, 1005, '2023-03-21', 'in-progress'),
+(510, 4, 1006, '2023-05-08', 'dropped'),
+(511, 5, 1006, '2023-01-26', 'completed'),
+(512, 5, 1007, '2023-04-09', 'in-progress'),
+(513, 5, 1001, '2023-02-19', 'completed'),
+(514, 6, 1006, '2023-04-21', 'in-progress'),
+(515, 6, 1002, '2023-02-09', 'in-progress'),
+(516, 6, 1008, NULL, 'completed'),
+(517, 7, 1005, '2023-05-13', 'in-progress'),
+(518, 7, 1006, '2023-02-05', 'in-progress'),
+(519, 7, 1008, NULL, 'dropped'),
+(520, 8, 1002, '2023-06-06', 'completed'),
+(521, 9, 1007, '2023-04-20', NULL),
+(522, 9, 1005, '2023-05-09', 'in-progress'),
+(523, 9, 1001, '2023-01-22', 'dropped'),
+(524, 10, 1002, '2023-06-11', 'in-progress'),
+(525, 10, 1006, '2023-03-14', 'completed'),
+(526, 10, 1005, '2023-04-01', 'completed'),
+(527, 11, 1005, '2023-01-28', 'dropped'),
+(528, 11, 1008, '2023-03-27', NULL),
+(529, 11, 1002, '2023-05-20', 'dropped'),
+(530, 12, 1003, '2023-02-18', 'in-progress'),
+(531, 13, 1001, '2023-01-04', NULL),
+(532, 13, 1005, '2023-03-08', 'in-progress'),
+(533, 13, 1003, '2023-02-19', 'completed'),
+(534, 14, 1002, '2023-04-27', 'dropped'),
+(535, 15, 1003, '2023-06-16', 'completed');
+
+
+INSERT INTO Assessments (assessment_id, student_id, course_id, score, date_taken) VALUES
+(801, 1, 1006, 58.26, '2023-05-28'),
+(802, 1, 1005, 98.22, '2023-05-25'),
+(803, 1, 1002, NULL, '2023-03-13'),
+(804, 2, 1002, 82.49, '2023-04-17'),
+(805, 3, 1006, 62.4, '2023-01-11'),
+(806, 3, 1003, 79.42, '2023-01-03'),
+(807, 4, 1003, 52.94, '2023-01-02'),
+(808, 4, 1005, NULL, '2023-02-09'),
+(809, 4, 1006, 60.71, '2023-02-24'),
+(810, 5, 1006, 78.55, '2023-04-08'),
+(811, 5, 1007, 90.37, '2023-02-04'),
+(812, 6, 1006, 71.18, '2023-04-28'),
+(813, 6, 1002, NULL, '2023-06-04'),
+(814, 7, 1005, 90.03, '2023-01-08'),
+(815, 7, 1008, 57.01, '2023-02-09'),
+(816, 8, 1002, 93.72, '2023-01-15'),
+(817, 9, 1007, NULL, '2023-01-02'),
+(818, 9, 1005, 77.03, '2023-01-03'),
+(819, 9, 1001, NULL, '2023-02-14'),
+(820, 10, 1002, 60.69, '2023-04-02'),
+(821, 11, 1005, 96.33, '2023-04-10'),
+(822, 11, 1008, 97.87, '2023-05-22'),
+(823, 11, 1002, NULL, '2023-03-07'),
+(824, 12, 1003, 78.96, '2023-05-02'),
+(825, 13, 1001, 52.86, '2023-05-16'),
+(826, 13, 1005, 92.64, '2023-02-02'),
+(827, 13, 1003, 54.01, '2023-02-03'),
+(828, 14, 1002, 83.76, '2023-02-13');
+
+INSERT INTO Payments (payment_id, student_id, course_id, amount_paid, payment_date) VALUES
+(901, 1, 1006, 195.97, '2023-02-19'),
+(902, 1, 1005, 130.43, '2023-05-03'),
+(903, 1, 1002, 140.56, '2023-05-19'),
+(904, 2, 1002, NULL, '2023-03-07'),
+(905, 3, 1006, 195.97, '2023-03-08'),
+(906, 3, 1002, 140.56, '2023-02-22'),
+(907, 3, 1003, NULL, '2023-04-11'),
+(908, 4, 1003, NULL, '2023-01-01'),
+(909, 4, 1005, NULL, '2023-05-04'),
+(910, 5, 1006, NULL, '2023-03-05'),
+(911, 5, 1007, 106.78, '2023-01-08'),
+(912, 5, 1001, 177.12, '2023-02-15'),
+(913, 6, 1006, 195.97, '2023-06-10'),
+(914, 6, 1002, 140.56, '2023-06-17'),
+(915, 7, 1005, 130.43, '2023-03-22'),
+(916, 7, 1008, 132.81, '2023-03-04'),
+(917, 8, 1002, 140.56, '2023-06-18'),
+(918, 9, 1005, 130.43, '2023-02-23'),
+(919, 9, 1001, 177.12, '2023-06-21'),
+(920, 10, 1002, 140.56, '2023-05-16'),
+(921, 10, 1006, 195.97, '2023-01-03'),
+(922, 10, 1005, NULL, '2023-03-02'),
+(923, 11, 1008, 132.81, '2023-06-09'),
+(924, 12, 1003, 171.07, '2023-06-14'),
+(925, 13, 1001, 177.12, '2023-01-03'),
+(926, 13, 1005, 130.43, '2023-06-05'),
+(927, 13, 1003, 171.07, '2023-03-19'),
+(928, 14, 1002, 140.56, '2023-04-05');
+
+
+
 -- Window Function Challenge – Longest Improvement Streak
 -- 🎯 Task
 -- For each student in each course:
@@ -79,129 +263,7 @@ grouped as (
     WHERE is_improved = 1
     GROUP BY student_id, course_id, grp;
  
- #----------------------------------------------------------------------
- 
---  Stored Procedure Challenge — Course Drop With Conditional Refund
--- 📌 Scenario
--- te a stored procedure:
--- 🧠 Business Rules
--- 1️⃣ Student must exist
--- 2️⃣ Course must exist
--- 3️⃣ Student must be enrolled
--- 4️⃣ Enrollment must NOT already be dropped or completed
--- 💰 Refund Policy
 
--- Calculate:total_paid = SUM(amount_paid > 0)
--- Then:
--- Case 1:
--- If total_paid = 0
--- → No refund
--- → Just mark dropped
-
--- Case 2:
--- If total_paid > 0 AND
--- student has taken less than 2 assessments
--- → 100% refund
--- Case 3:
--- If total_paid > 0 AND
--- student has taken 2 or more assessments
--- → 50% refund
-
--- ⚙️ Transaction Logic
--- Inside transaction:
--- 1️⃣ Insert negative refund record into payments
--- 2️⃣ Update enrollment → status = 'dropped'
--- 3️⃣ Commit
--- If ANY error → Rollback
-
-delimiter //
-create procedure refund_policy(in student_id_input int, in course_id_input int, out total_assessments int, 
-out total_paid decimal(10,2), out refund_amt decimal(10,2), out v_status varchar(50))
-begin
-
-declare exit handler for sqlexception
-begin
-rollback;
-signal sqlstate '45000'
-set message_text ='refund failed';
-end;
-
-if not exists (select 1 from students
-where student_id = student_id_input) then 
-	signal sqlstate '45000'
-    set message_text ='student does not exists';
-end if;
-
-if not exists (select 1 from courses
-where course_id = course_id_input) then
-	signal sqlstate '45000'
-    set message_text ='course does not exists';
-end if;
-
-if not exists(select 1 from enrollments 
-where student_id = student_id_input and course_id = course_id_input) then 
-	signal sqlstate '45000'
-    set message_text ='student not enrolled';
-end if;
-
-select status into v_status from enrollments
-where student_id = student_id_input and course_id = course_id_input;
-
-if v_status in ('dropped', 'completed') then 
-	signal sqlstate '45000'
-    set message_text ='student enroll status should not be dropped or completed';
-end if;
-
-select count(*) into total_assessments from assessments
-where student_id = student_id_input and course_id = course_id_input and score is not null;
-
-select 
-coalesce(sum(amount_paid),0) into total_paid
-from payments
-where student_id = student_id_input and course_id = course_id_input and amount_paid > 0;
-
-if exists (select 1 from payments 
-where student_id = student_id_input and course_id = course_id_input and amount_paid <0) then 
-	signal sqlstate '45000'
-    set message_text ='refund already issued';
-end if;
-
-set refund_amt = -1*total_paid;
-start transaction;
-if total_paid =0 then 
-set refund_amt =0;
-end if;
-
-if total_paid >0 and total_assessments < 2 then 
-insert into payments (student_id, course_id, amount_paid, payment_date) values
-(student_id_input, course_id_input, refund_amt, curdate());
-end if;
-
-if total_paid >0 and total_assessments >= 2 then 
-insert into payments (student_id, course_id, amount_paid, payment_date) values
-(student_id_input, course_id_input, refund_amt/2, curdate());
-end if;
-
-update enrollments set status ='dropped'
-where student_id = student_id_input and course_id = course_id_input ;
-set v_status ='dropped';
-
-commit;
-end//
-delimiter ;
- 
- 
-set @total_assessments = 0;
-set @total_paid = 0;
-set @refund_amt = 0;
-set @v_status = '';
-call refund_policy(1, 1002, @total_assessments, @total_paid, @refund_amt, @v_status);
-
-SELECT @total_assessments AS total_assessments,
-       @total_paid        AS total_paid,
-       @refund_amt        AS refund_amt,
-       @v_status          AS v_status;
-       
 #-------------------------------------------------------------------------
 
 -- Stored Procedure Challenge — Student Engagement Report
@@ -275,7 +337,98 @@ delimiter ;
  select * from enrollments where student_id =1;
  
  
+ #------------------------------------------------------------
+--  Question: Top Performers Within Each Course
+-- For each course:
+-- 👉 rank students based on their assessment score (highest first)
+-- 👉 show only students who have a score (ignore NULL)
+-- 👉 display the top 3 performers per course
+
+
+select * from (select course_id, student_id, date_taken,score,
+dense_rank() over (partition by course_id order by score desc) as student_rank
+ from assessments
+ where score is not null) as r
+ where student_rank <= 3;
+
+#------------------------------------------------------
+
+-- Question: Identify Consistently Improving Students
+-- For each student & course:
+-- 1️⃣ Compare each assessment score with the previous attempt
+-- 2️⃣ Show whether the student improved, declined, or stayed same
+-- 3️⃣ Calculate the score difference from the previous attempt
+select * from assessments;
+alter table assessments
+modify assessment_id int auto_increment;
+INSERT INTO assessments (student_id, course_id, score, date_taken)
+VALUES (11, 1008, 95, CURDATE());
+
+select student_id, course_id, date_taken,score,
+lag(score) over (partition by course_id, student_id order by date_taken) as prev_score,
+abs(score - lag(score) over (partition by course_id, student_id order by date_taken)) as score_diff,
+case
+	when lag(score) over (partition by course_id, student_id order by date_taken)is null then null
+	when score > lag(score) over (partition by course_id, student_id order by date_taken) then 'improved'
+    when score < lag(score) over (partition by course_id, student_id order by date_taken) then 'declined'
+    else 'same'
+    end as "label"
+ from assessments
+ where score is not null;
  
+ 
+ #-----------------------------------------------------------------------
+ -- 🧠 Question: Detect Revenue Leakage (Unpaid Enrollments)
+-- The academy wants to find enrollments where:
+-- ✅ student enrolled
+-- ✅ course has a price
+-- ❌ payment missing OR incomplete
+-- AND also compute:total course price, total paidamount, amount_due, payment_status
+
+with base as 
+(
+	select 
+		c.title, e.student_id, e.course_id,c.price,
+		coalesce(sum(p.amount_paid),0)as total_paid
+	from enrollments as e
+	left join courses as c on e.course_id = c.course_id
+	left join payments as p on e.course_id = p.course_id and e.student_id = p.student_id
+	where c.price is not null
+	group by c.title, e.student_id,c.price,e.course_id
+),
+stud_info as
+(
+		select
+			s.student_id,b.course_id, s.name,b.title, b.price, b.total_paid,
+			b.price- b.total_paid as amount_due
+		from students as s
+		join base as b on s.student_id = b.student_id
+)
+select *,
+case
+    when total_paid < price then 'partital paid'
+    when total_paid = 0 then 'unpaid'
+    else 'paid'
+    end as 'payment_status'
+ from stud_info;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
  
  
  
