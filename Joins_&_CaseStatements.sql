@@ -110,6 +110,31 @@ left join  enrollments as e on s.student_id = e.student_id
 left join assessments as a on e.course_id = a.course_id and e.student_id = a.student_id
 group by s.student_id,s.name;
 
+#--------------------------------------------------------------------------------
+
+-- Q. Student Payment Score Status
+-- Write a query to show:
+-- student_id | course_id | amount_paid | score | final_status
+-- Rules for final_status:
+-- If amount_paid is NULL → 'Payment Pending'
+-- If score is NULL → 'Assessment Pending'
+-- If amount_paid is not NULL and score >= 80 → 'Top Paid Student'
+-- If amount_paid is not NULL and score between 60 and 79.99 → 'Regular Paid Student'
+-- If amount_paid is not NULL and score < 60 → 'Paid but Needs Improvement'
+
+select * from assessments;
+select * from payments;
+
+select a.student_id, a.course_id, p.amount_paid, a.score,
+case
+when p.amount_paid is null then "payment peding"
+when a.score is null then "assessment pending"
+when p.amount_paid is not null and a.score >=90 then "top paid stud"
+when p.amount_paid is not null and a.score between 60 and 79.99 then "regular paid stud"
+ when p.amount_paid is not null and a.score < 60 then "paid but need improvement"
+ end as final_status
+ from assessments as a
+join payments as p on a.student_id = p.student_id and a.course_id = p.course_id;
 
 
 
