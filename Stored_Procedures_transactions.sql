@@ -78,7 +78,137 @@ set @pending =0;
 call course_enroll_by_status(1001, @dropp, @comp,@in_prog,@pending);
 select @dropp, @comp,@in_prog,@pending;
 
+#-----------------------------------------------------------------------------
 
+-- Create a stored procedure:
+-- get_student_payment_summary
+-- student_id | student_name | total_courses | pending_payments | completed_payments | total_amount_paid
+select * from students;
+select s.student_id, s.name,count(e.course_id),
+count(case when p.amount_paid is null then 1 end) as pending_pays,
+count(case when p.amount_paid >= c.price then 1 end) as comp_pays,
+sum(p.amount_paid)
+from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join courses as c on e.course_id = c.course_id
+left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+group by s.student_id;
+
+delimiter //
+create procedure stud_payment_summary(in student_id_input int, out total_courses int, out pen_pay int, out comp_pay int,
+out total_paid decimal(10,2))
+begin
+select 
+	count(e.course_id),
+	count(case when p.amount_paid is null then 1 end) as pending_pays,
+	count(case when p.amount_paid >= c.price then 1 end) as comp_pays,
+	sum(p.amount_paid)
+into total_courses, pen_pay, comp_pay, total_paid
+from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join courses as c on e.course_id = c.course_id
+left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+where s.student_id = student_id_input;
+
+select 
+	s.student_id,
+	 s.name, count(e.course_id) as total_courses,
+	count(case when p.amount_paid is null then 1 end) as pending_pays,
+	count(case when p.amount_paid >= c.price then 1 end) as comp_pays,
+	sum(p.amount_paid) as total_paid_amt
+from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join courses as c on e.course_id = c.course_id
+left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+group by s.student_id;
+
+end//
+delimiter ;
+drop procedure if exists stud_payment_summary;
+
+set @total_courses =0;
+set @pen_pay=0;
+set @comp_pay =0;
+set @total_paid =0.0;
+call stud_payment_summary(1, @total_courses, @pen_pay, @comp_pay, @total_paid);
+select @total_courses, @pen_pay, @comp_pay, @total_paid;
+
+#------------------------------------------------------------
+
+delimiter //
+create procedure stud_payment_summary_1(in student_id_input int)
+begin
+select 
+s.student_id, s.name,
+	count(e.course_id) as total_courses,
+	count(case when p.amount_paid is null then 1 end) as pending_pays,
+	count(case when p.amount_paid >= c.price then 1 end) as comp_pays,
+	sum(p.amount_paid) as total_amt_paid
+from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join courses as c on e.course_id = c.course_id
+left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+where s.student_id = student_id_input
+group by s.student_id;
+end//
+delimiter ;
+
+call stud_payment_summary_1(1);
+
+#-----------------------------------------------------------------
+
+-- Create a stored procedure:
+-- update_student_bonus
+-- For a given student (p_student_id):
+-- Step 1: Count enrollments
+-- If enrolled courses ≥ 3 → add +50
+-- If enrolled courses = 2 → add +20
+-- If enrolled courses = 1 → add +10
+-- If no enrollments → no change
+-- Step 2: Check performance
+-- If avg score ≥ 80 → add +30
+-- If avg score between 60–79 → add +10
+-- If avg score < 60 → subtract -10
+-- If no score → no change
+-- 📤 Final Output
+
+-- 👉 Updated value of p_bonus
+
+delimiter //
+create procedure update_bonus(in student_id_input int, inout p_bonus decimal(10,2))
+begin
+declare total_courses int;
+declare avg_score decimal(10,2);
+
+select count(course_id) into total_courses from enrollments
+where student_id = student_id_input;
+
+select avg(score) into avg_score from assessments
+where student_id = student_id_input;
+
+if total_courses >= 3 then
+set p_bonus = p_bonus+50;
+elseif total_courses =2 then 
+set p_bonus =p_bonus+20;
+elseif total_courses =1 then 
+set p_bonus =p_bonus+10;
+end if;
+
+if avg_score >= 80 then
+        set p_bonus = p_bonus + 30;
+    elseif  avg_score >= 60 then
+        set p_bonus = p_bonus + 10;
+    elseif avg_score < 60 then 
+        set p_bonus = p_bonus - 10;
+    end if;
+
+
+end//
+delimiter ;
+
+set @p_bonus =100;
+call update_bonus(2, @p_bonus);
+select @p_bonus;
 
 --  Stored Procedure Challenge — Course Drop With Conditional Refund
 -- 📌 Scenario
