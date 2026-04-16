@@ -189,6 +189,35 @@ INSERT INTO Payments (payment_id, student_id, course_id, amount_paid, payment_da
 
 
 
+-- QUESTION: Detect First Payment per Student
+-- 🎯 Task
+-- For each student:
+-- 👉 Identify their first payment (chronologically)
+-- 👉 Compare all other payments against it
+-- 📊 Output
+-- student_id | course_id | payment_date | amount_paid | first_payment | diff_from_first
+-- 📌 Requirements
+-- Find first payment amount per student
+-- Show it on every row
+
+select * from (select student_id, course_id,payment_date, amount_paid,
+row_number() over (partition by student_id order by payment_date asc) as first_payment
+from payments) as p
+where first_payment =1;
+ 
+select 
+student_id, 
+course_id,
+payment_date,
+ amount_paid,
+row_number() 
+over (partition by student_id order by payment_date asc) as first_pay_date_wise,
+first_value(amount_paid)
+ over (partition by student_id order by payment_date asc) as first_payment,
+abs(amount_paid - first_value(amount_paid) 
+over (partition by student_id order by payment_date asc)) as diff_from_first_pay
+from payments;
+
 -- Window Function Challenge – Longest Improvement Streak
 -- 🎯 Task
 -- For each student in each course:
@@ -344,6 +373,12 @@ delimiter ;
 -- 👉 show only students who have a score (ignore NULL)
 -- 👉 display the top 3 performers per course
 
+select * from (select student_id, course_id, score,
+dense_rank() over (partition by course_id order by score desc) as top_scorers
+from assessments
+where score is not null) as r
+where top_scorers <=3;
+
 
 select * from (select course_id, student_id, date_taken,score,
 dense_rank() over (partition by course_id order by score desc) as student_rank
@@ -363,6 +398,18 @@ alter table assessments
 modify assessment_id int auto_increment;
 INSERT INTO assessments (student_id, course_id, score, date_taken)
 VALUES (11, 1008, 95, CURDATE());
+
+select student_id, course_id, score, date_taken,
+lag(score) over (partition by course_id , student_id order by date_taken) as previous_score,
+abs(score - lag(score) over (partition by course_id , student_id order by date_taken)) as score_diff,
+case
+when lag(score) over (partition by course_id , student_id order by date_taken) is null then null
+when score > lag(score) over (partition by course_id , student_id order by date_taken) then "improved"
+when score < lag(score) over (partition by course_id , student_id order by date_taken) then "declined"
+else "same"
+end as tag
+ from assessments;
+
 
 select student_id, course_id, date_taken,score,
 lag(score) over (partition by course_id, student_id order by date_taken) as prev_score,
