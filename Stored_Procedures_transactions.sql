@@ -5,6 +5,54 @@ select * from payments;
 select * from assessments;
 select * from courses;
 
+-- Stored Procedure Question: Course Performance Report
+-- 🎯 Create Procedure
+-- get_course_performance_report
+-- course_id | title | total_students | avg_score | pass_count | fail_count | pass_percentage
+-- 📌 Requirements
+-- 1. Total Students
+-- 2. Average Score
+-- 3. Pass / Fail Logic
+-- score ≥ 60 → Pass
+-- score < 60 → Fail
+-- NULL → ignore
+-- 4. Pass Count
+-- 👉 Number of students who passed
+-- 5. Fail Count
+-- 👉 Number of students who failed
+-- 6. Pass Percentage
+-- (pass_count / total_students) * 100
+
+select c.course_id, count(distinct(e.student_id)),
+count(case when a.score >=60 then 1 end) as pass_count,
+count(case when a.score < 60 then 1 end) as fail_count,
+count(case when a.score is null then 1 end) as not_attempted,
+round(count(case when a.score >=60 then 1 end)/count(distinct(e.student_id))*100,2) as pass_percentage
+ from courses as c
+left join enrollments as e on c.course_id = e.course_id
+left join assessments as a on e.course_id = a.course_id and e.student_id = a.student_id
+group by c.course_id;
+
+delimiter //
+create procedure get_course_performance_report(in course_id_input int)
+begin
+
+select c.course_id,c.title, count(distinct(e.student_id)) as total_students,
+avg(a.score) as avg_score,
+count(case when a.score >=60 then 1 end) as pass_count,
+count(case when a.score < 60 then 1 end) as fail_count,
+count(case when a.score is null then 1 end) as not_attempted,
+round(count(case when a.score >=60 then 1 end)/count(distinct(e.student_id))*100,2) as pass_percentage
+ from courses as c
+left join enrollments as e on c.course_id = e.course_id
+left join assessments as a on e.course_id = a.course_id and e.student_id = a.student_id
+-- where course_id = course_id_input
+group by c.course_id,c.title;
+end//
+delimiter ;
+
+drop procedure if exists get_course_performance_report;
+call get_course_performance_report(1001);
 
 -- Q. Get Student Course Summary
 -- Create a stored procedure :
