@@ -5,6 +5,10 @@ select * from payments;
 select * from assessments;
 select * from courses;
 
+-- A CTE is like a temporary table where you write a query, give it a name, and then use its results in the main query.
+-- A CTE is a named temporary result set that is defined 
+-- using a query and can be used in the main query to make complex SQL more readable and structured.
+
 CREATE TABLE Students (
   student_id INT PRIMARY KEY,
   name VARCHAR(50),
@@ -460,14 +464,139 @@ case
  from stud_info;
 
 
+#Question: Students with Above Average Score
+-- Find students whose average score is greater than 70
 
+with stud_score as
+(
+	select 
+    student_id, course_id, 
+    avg(score) as avg_score 
+    from assessments
+	group by student_id, course_id
+)
+select * from stud_score
+where avg_score > 70
+and avg_score is not null;
 
+#-----------------------------------------------------------------------------------
 
+-- #Above Average Scorers per Course
+-- 👉 Find students whose score is above the average score of their course
+-- 📊 Output
+-- student_id | course_id | score | course_avg
+select * from assessments;
 
+with course_avg_score as
+ (
+select 
+	course_id, 
+	avg(score) as avg_score 
+from assessments
+group by course_id
+)
+select 
+	a.student_id, 
+	c.course_id, 
+	a.score, 
+	c.avg_score 
+from assessments as a 
+join course_avg_score as c on a.course_id = c.course_id
+where a.score > c.avg_score;
 
+#---------------------------------------------------------------------------------
+-- Q. Highest Paying Student per Course
+-- Using payments:
+-- Create a CTE to rank students by amount_paid within each course, then return only the highest paying student for each course.
+-- Output:
+-- student_id | course_id | amount_paid
 
+with ranking as 
+(select 
+	student_id, course_id,amount_paid, 
+	dense_rank() over (partition by course_id order by amount_paid desc) as rank_by_paid
+from payments
+where amount_paid is not null
+  )
+select * from ranking where rank_by_paid = 1;
 
+#----------------------------------------------------------------------
+-- Students with Both High Score and High Payment
+-- Find students who:
+-- have average score > 75
+-- and total payment > 300
+-- Output:
+-- student_id | avg_score | total_payment
 
+with avg_sc as (select student_id, avg(score)  as avg_score
+from assessments
+where score is not null
+group by student_id),
+total_pay as
+(
+select student_id, sum(amount_paid) as total_paid 
+from payments
+where amount_paid is not null 
+group by student_id)
+select s.student_id, s.name, a.avg_score, t.total_paid
+ from students as s
+join avg_sc as a on s.student_id = a.student_id
+join total_pay as t on s.student_id = t.student_id
+where a.avg_score > 75 and t.total_paid > 300;
+
+#Q. Multiple CTEs
+-- Find students who:
+-- enrolled in more than 2 courses
+-- have average score above the overall average score of all students
+-- Expected output:
+-- student_id | total_courses | avg_score
+
+with stud_info as (
+select
+	 e.student_id, 
+     count(e.course_id) as total_courses,
+	avg(a.score) as avg_score
+ from enrollments as e
+join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+group by e.student_id
+),
+overall_stud_score as
+(
+select 
+	student_id, 
+	avg(score) over () as overall_avg_score 
+from assessments
+)
+select s.student_id, s.total_courses,
+o.overall_avg_score,
+s.avg_score from stud_info as s
+join overall_stud_score as o on s.student_id = o.student_id
+where s.avg_score > o.overall_avg_score
+and s.total_courses >=2;
+
+#--------------------------------------------
+
+with stud_info as (
+select
+	 e.student_id, 
+     count(e.course_id) as total_courses,
+	avg(a.score) as avg_score
+ from enrollments as e
+join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+group by e.student_id
+),
+overall_stud_score as
+(
+select 
+	avg(score) as overall_avg_score 
+from assessments
+)
+select s.student_id, s.total_courses,
+o.overall_avg_score,
+s.avg_score from stud_info as s
+cross join overall_stud_score as o 
+where s.avg_score > o.overall_avg_score
+and s.total_courses >=2;
 
 
 
