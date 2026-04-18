@@ -4,6 +4,127 @@ select * from enrollments;
 select * from payments;
 select * from assessments;
 select * from courses;
+-- Detect Student Risk Level
+-- Create a stored procedure:
+-- get_student_risk_level
+-- 📥 Input
+-- IN p_student_id INT
+-- 📊 Output
+-- student_id | student_name | avg_score | total_courses | dropped_courses | risk_level
+
+delimiter //
+create procedure student_risk_level(in student_id_input int, out total_courses int, out dropped_courses int,
+out risk_level varchar(50), out avg_score decimal(10,2))
+begin
+select count(e.course_id) ,
+avg(a.score),
+count(case when e.status ="dropped" then 1 end) ,
+case 
+	when count(case when e.status ="dropped" then 1 end) >= 2 then "high risk"
+    when avg(a.score) <= 60 then "medium risk"
+    when count(e.course_id) =0 then "inactive"
+    else "low risk"
+    end 
+    into total_courses, avg_score, dropped_courses, risk_level
+    from enrollments as e
+left join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+where e.student_id = student_id_input;
+end//
+delimiter ;
+
+drop procedure if exists student_risk_level;
+
+set @total_courses =0;
+set @dropped_courses =0;
+set @risk_level = "";
+set @avg_score =0.0;
+call student_risk_level(2, @total_courses, @dropped_courses, @risk_level, @avg_score);
+select @total_courses, @dropped_courses, @risk_level, @avg_score;
+
+#------------------------------------------------------------------
+-- Task: Write a stored procedure that does both of these in a single transaction:
+-- Insert a new row into Enrollments
+-- Insert a new row into Payments
+-- Business Rule
+-- Before inserting payment:
+-- check the course price from Courses
+-- if p_amount_paid is greater than course price, then:
+-- do not insert anything
+-- rollback transaction
+-- Also:
+-- if student does not exist → rollback
+-- if course does not exist → rollback
+-- Expected behavior
+-- If everything is valid:
+-- insert into Enrollments
+-- insert into Payments
+-- COMMIT
+-- If any error happens:
+-- ROLLBACK
+
+delimiter //
+create procedure enroll_student_with_payment
+(in student_id_input int, in course_id_input int, in p_amount_paid decimal(10,2))
+begin
+
+declare v_price decimal(10,2);
+declare exit handler for sqlexception
+begin
+rollback;
+signal sqlstate '45000'
+set message_text = 'insert failed';
+end;
+
+if not exists(Select 1 from students
+where student_id = student_id_input) then
+	signal sqlstate '45000'
+    set message_text ='student does not exists';
+end if;
+
+if not exists(Select 1 from courses
+where course_id = course_id_input) then
+	signal sqlstate '45000'
+    set message_text ='course does not exists';
+end if;
+
+if exists (select 1 from enrollments 
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student enrolled';
+end if;
+
+select price into v_price from courses
+where course_id = course_id_input ;
+
+
+IF p_amount_paid > v_price THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'paid more than course price';
+    END IF;
+
+start transaction;
+insert into enrollments(student_id, course_id, enroll_date, status) values
+(student_id_input, course_id_input, curdate(), 'in-progress');
+
+insert into payments (student_id, course_id, amount_paid, payment_date) values
+(student_id_input, course_id_input, p_amount_paid,curdate());
+
+commit;
+end//
+delimiter ;
+drop procedure if exists enroll_student_with_payment;
+
+call enroll_student_with_payment(8,1006,200);
+
+ALTER TABLE enrollments 
+MODIFY enrollment_id INT AUTO_INCREMENT;
+alter table payments
+modify payment_id int auto_increment;
+
+select * from enrollments;
+select * from payments;
+select * from courses;
+#----------------------------------------------------------------
 
 -- Stored Procedure Question: Course Performance Report
 -- 🎯 Create Procedure
@@ -290,6 +411,119 @@ select @p_bonus;
 -- 2️⃣ Update enrollment → status = 'dropped'
 -- 3️⃣ Commit
 -- If ANY error → Rollback
+
+delimiter //
+create procedure refund (in student_id_input int, in course_id_input int,
+out total_paid decimal(10,2), out total_assessments int, out refund_amt decimal(10,2), out v_status varchar(50))
+begin
+declare exit handler for sqlexception
+begin
+rollback;
+signal sqlstate '45000'
+set message_text ='refund failed';
+end;
+
+
+if not exists (select 1 from students
+where student_id = student_id_input )then
+	signal sqlstate '45000'
+    set message_text = 'student does not exists';
+end if;
+
+if not exists (Select 1 from courses 
+where course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text = 'course does not exists';
+end if;
+
+if not exists (select 1 from enrollments 
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text = 'student not enrolled';
+end if;
+
+-- Enrollment must NOT already be dropped or completed 
+select status into v_status from enrollments
+where student_id = student_id_input and course_id = course_id_input;
+
+-- if v_status in ('dropped', 'completed') then 
+-- 	signal sqlstate '45000'
+--     set message_text = 'student status shud not be dropped or completed';
+-- end if;
+
+if exists (select 1 from enrollments 
+where student_id = student_id_input and course_id = course_id_input 
+and v_status in ('dropped', 'completed')) then 
+	signal sqlstate '45000'
+    set message_text ='student status must not be dropped or completed';
+end if;
+
+
+select sum(amount_paid) into total_paid
+from payments 
+where student_id = student_id_input and course_id = course_id_input
+and amount_paid > 0;
+
+if exists (select 1 from payments
+where student_id = student_id_input and course_id = course_id_input
+and amount_paid < 0)then
+	signal sqlstate '45000'
+    set message_text = 'refund already issued';
+end if;
+
+select count(score) into total_assessments from assessments
+where student_id = student_id_input and course_id = course_id_input
+and score is not null;
+
+set refund_amt =-1*total_paid;
+
+start transaction;
+-- Case 1:
+-- If total_paid = 0
+-- → No refund
+-- → Just mark dropped
+
+if total_paid =0 then
+set refund_amt=0;
+end if;
+
+ -- Case 2:
+-- If total_paid > 0 AND
+-- student has taken less than 2 assessments
+-- → 100% refund
+if total_paid >0 and total_assessments < 2 then 
+insert into payments (student_id, course_id, amount_paid, payment_date) values
+(student_id_input, course_id_input, refund_amt, curdate());
+end if;
+
+-- Case 3:
+-- If total_paid > 0 AND
+-- student has taken 2 or more assessments
+-- → 50% refund
+if total_paid >0 and total_assessments >= 2 then 
+insert into payments (student_id, course_id, amount_paid, payment_date) values
+(student_id_input, course_id_input, refund_amt/2, curdate());
+end if;
+
+update enrollments set status ='dropped' 
+where student_id = student_id_input and course_id = course_id_input;
+set v_status='dropped';
+
+commit;
+end//
+delimiter ;
+set @total_assessments = 0;
+set @total_paid = 0;
+set @refund_amt = 0;
+set @v_status = '';
+call refund(7, 1006, @total_assessments, @total_paid, @refund_amt, @v_status);
+
+SELECT @total_assessments,@total_paid ,@refund_amt, @v_status; 
+
+select * from enrollments;
+select * from assessments where student_id =7 and coursE_id =1006;
+
+#------------------------------------------------------------------------------------------
 
 delimiter //
 create procedure refund_policy(in student_id_input int, in course_id_input int, out total_assessments int, 
