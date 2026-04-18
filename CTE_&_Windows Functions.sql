@@ -598,6 +598,68 @@ cross join overall_stud_score as o
 where s.avg_score > o.overall_avg_score
 and s.total_courses >=2;
 
+#----------------------------------------------------------------------------
+
+-- CTE Question (Medium–Advanced)
+-- 🎯 Question: Course with Highest Revenue
+-- 👉 Find the course(s) that generated the highest total revenue
+-- 📊 Expected Output
+-- course_id | total_revenue
+-- 👉 total revenue per course 
+-- 👉 find the maximum revenue
+-- 👉 return the course(s) whose revenue = max revenue
+
+select * from courses;
+select * from payments;
+
+with course_total_paid as 
+(
+	select 
+		course_id, 
+		sum(amount_paid) as total_paid
+	 from payments
+	 where amount_paid is not null
+	group by course_id
+),
+max_amt as 
+(
+	select 
+		max(total_paid) as maximum_course_amt
+	from course_total_paid
+)
+	select 
+		c.course_id, 
+        c.total_paid as total_rev, 
+        m.maximum_course_amt
+	 from course_total_paid as c
+	cross join max_amt as m
+	where c.total_paid = m.maximum_course_amt;
+
+#------------------------------------------------------------------
+-- QUESTION: Student Performance Category per Course
+-- 🎯 Task
+-- For each student in each course:
+-- 👉 Compare their score with course average
+-- 👉 Assign a performance category using CASE
+-- 📊 Expected Output
+-- student_id | course_id | score | course_avg | performance_tag
+
+select student_id, course_id,score,
+avg(score) over (partition by course_id) as  course_avg,
+dense_rank() over (partition by course_id order by score desc) as score_Wise_rank,
+case
+	when score > avg(score) over (partition by course_id) then "above avg"
+    when score < avg(score) over (partition by course_id) then "below avg"
+    when score = avg(score) over (partition by course_id) then "same"
+    end as performance_tag
+from assessments
+where score is not null;
+
+select course_id, avg(score) from assessments
+group by course_id;
+
+#--------------------------------------------------------------------------
+
 
 
 
