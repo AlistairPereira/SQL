@@ -644,8 +644,11 @@ max_amt as
 -- 📊 Expected Output
 -- student_id | course_id | score | course_avg | performance_tag
 
-select student_id, course_id,score,
-avg(score) over (partition by course_id) as  course_avg,
+select 
+	student_id, 
+    course_id,
+    score,
+	avg(score) over (partition by course_id) as  course_avg,
 dense_rank() over (partition by course_id order by score desc) as score_Wise_rank,
 case
 	when score > avg(score) over (partition by course_id) then "above avg"
@@ -657,17 +660,187 @@ where score is not null;
 
 select course_id, avg(score) from assessments
 group by course_id;
+#--------------------------------------------------------------------------
+
+-- Detect Student Risk Level
+-- Create a stored procedure:
+-- get_student_risk_level
+-- 📥 Input
+-- IN p_student_id INT
+-- 📊 Output
+-- student_id | student_name | avg_score | total_courses | dropped_courses | risk_level
+
+delimiter //
+create procedure student_risk_level(in student_id_input int, out total_courses int, out dropped_courses int,
+out risk_level varchar(50), out avg_score decimal(10,2))
+begin
+select count(e.course_id) ,
+avg(a.score),
+count(case when e.status ="dropped" then 1 end) ,
+case 
+	when count(case when e.status ="dropped" then 1 end) >= 2 then "high risk"
+    when avg(a.score) <= 60 then "medium risk"
+    when count(e.course_id) =0 then "inactive"
+    else "low risk"
+    end 
+    into total_courses, avg_score, dropped_courses, risk_level
+    from enrollments as e
+left join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+where e.student_id = student_id_input;
+end//
+delimiter ;
+
+drop procedure if exists student_risk_level;
+
+set @total_courses =0;
+set @dropped_courses =0;
+set @risk_level = "";
+set @avg_score =0.0;
+call student_risk_level(2, @total_courses, @dropped_courses, @risk_level, @avg_score);
+select @total_courses, @dropped_courses, @risk_level, @avg_score;
+
+#--------------------------------------------------------------------------
+-- Question: Most Active Students
+-- 👉 Find students who have enrolled in more courses than the average number of courses per student
+-- 📊 Expected Output
+-- student_id | total_courses | avg_courses
+-- 📌 Requirements
+-- Step 1:👉 Calculate total courses per student
+-- Step 2:👉 Calculate overall average number of courses
+-- Step 3:👉 Return students where:
+-- total_courses > avg_courses
+
+with total_enrolled as 
+(
+	select
+		 student_id, 
+		 count(course_id) as total_courses 
+	 from enrollments
+	group by student_id
+),
+avg_courses as 
+(
+	select 
+		avg(total_courses) as avg_courses 
+	from total_enrolled
+)
+select * ,
+case 
+	when t.total_courses >= a.avg_courses +2 then "highly active"
+	when t.total_courses > a.avg_courses  then "active"
+    else "normal"
+	end as activity
+    from total_enrolled as t
+cross join avg_courses as a
+where t.total_courses > a.avg_courses;
+
+#--------------------------------------------------------------
+-- Now your Window Function Question
+-- 🧠 Question: Identify Top Growing Payments
+-- 👉 For each student:
+-- Compare current payment with previous payment
+-- Calculate difference
+-- Tag the trend using CASE
+-- 📊 Expected Output
+-- student_id | payment_date | amount_paid | prev_payment | diff | trend
+
+select student_id, amount_paid, payment_date,
+lag(amount_paid) over (partition by student_id order by payment_date) as prev_payment,
+amount_paid - lag(amount_paid) over (partition by student_id order by payment_date) as diff,
+case
+	when lag(amount_paid) over (partition by student_id order by payment_date) is null then "first payment"
+	when amount_paid > lag(amount_paid) over (partition by student_id order by payment_date) then "increased"
+	when amount_paid < lag(amount_paid) over (partition by student_id order by payment_date) then "decreased"
+    else "same"
+    end as trend
+from payments
+where amount_paid is not null;
+
+#------------------------------------------------------------------------
+
+delimiter //
+create procedure get_course_summary(in student_id_input int, out total_courses int, out avg_score decimal(10,2),
+out high_scores decimal(10,2), out low_scores decimal(10,2), out performance_tag varchar(50))
+begin
+select count(e.course_id) ,
+avg(a.score) ,
+sum( case when a.score >=80 then 1 end) ,
+sum(case when a.score >= 60 then 1 end),
+case
+	when avg(a.score) >= 80 then "excellent"
+    when avg(a.score) >= 60 then "good"
+    else "needs improvement"
+    end 
+    into total_courses, avg_score, high_scores, low_scores, performance_tag
+    from enrollments as e
+join assessments as a on e.course_id = a.course_id and e.student_id = a.student_id
+where e.student_id = student_id_input;
+end//
+delimiter ;
+
+set @total_courses =0;
+set @avg_score =0.0;
+set @high_scores =0.0;
+set @low_scores =0.0;
+set @performance_tag = "";
+call get_course_summary(1, @total_courses,@avg_score,@high_scores,@low_scores,@performance_tag);
+select @total_courses,@avg_score,@high_scores,@low_scores,@performance_tag ;
+
+#-------------------------------------------------------------------------------------
+
+-- Q: Students Who Improved Over Time
+-- 👉 Find students whose latest score is higher than their first score
+-- 📊 Expected Output
+-- student_id | first_score | latest_score
+
+with ein_score as 
+(
+	select * from 
+		(
+			select student_id, score as first_score,date_taken,
+			row_number() over (partition by student_id order by date_taken asc) as f_score_rank
+		from assessments
+		where score is not null
+        ) as f
+	where f_score_rank =1
+ ),
+zwei_score as 
+(
+	select * from 
+		(select 
+			student_id, score as last_score,date_taken,
+			row_number() over (partition by student_id order by date_taken desc) as l_score_rank
+		 from assessments
+		 where score is not null) as l
+	 where l_score_rank =1
+ )
+	 select 
+		e.student_id, e.first_score , z.last_score
+	 from ein_score as e
+	 join zwei_score as z on e.student_id = z.student_id
+	 where z.last_score > e.first_score ;
 
 #--------------------------------------------------------------------------
 
+-- Q: Consecutive Payment Increase
+-- 👉 Find students who have 2 consecutive payments where the amount increased
+-- 📊 Expected Output
+-- student_id | payment_date | amount_paid | prev_payment | prev2_payment
 
-
-
-
-
-
-
- 
+select student_id, payment_date, amount_paid,
+lag(amount_paid,1) over (partition by student_id order by payment_date) as prev_payment,
+lag(amount_paid,2) over (partition by student_id order by payment_date) as prev2_payment,
+case 
+when lag(amount_paid,2) over (partition by student_id order by payment_date)<
+lag(amount_paid,1) over (partition by student_id order by payment_date) and 
+lag(amount_paid,1) over (partition by student_id order by payment_date) < amount_paid then "imcreasing"
+when lag(amount_paid,2) over (partition by student_id order by payment_date)>
+lag(amount_paid,1) over (partition by student_id order by payment_date) and 
+lag(amount_paid,1) over (partition by student_id order by payment_date) > amount_paid then "decrese"
+else "fluctuating"
+end as trend_flag
+ from payments
+ where amount_paid is not null;
  
  
  
