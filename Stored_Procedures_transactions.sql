@@ -4,6 +4,53 @@ select * from enrollments;
 select * from payments;
 select * from assessments;
 select * from courses;
+-- #-------------------------------------------------------------------------
+-- Top Performer Course for a Student
+-- Create a procedure:
+-- get_student_best_course
+-- For the given student:
+-- Find the course where the student scored highest
+-- Return:
+-- student_id
+-- course_id
+-- course title (from courses)
+-- score
+select a.student_id, c.course_id, c.title, max(a.score)
+ from courses as c
+left join assessments as a on c.course_id = a.course_id
+group by a.student_id;
+
+select * from assessments;
+select student_id,  max(score) from assessments
+group by student_id;
+
+delimiter //
+create procedure get_student_best_course(in student_id_input int)
+begin
+	select 
+		a.student_id, 
+		c.coursE_id,
+		c.title, a.score,
+		case
+		when a.score >= 80 then "outstanding"
+		when a.score >=60 then "good"
+		else "okay"
+		end as perform_tag
+	 from assessments as a
+	join courses as c on a.course_id = c.course_id
+	where student_id = student_id_input 
+	and a.score is not null and 
+	a.score = (
+				select max(score) from assessments
+				where student_id = student_id_input and score is not null
+			);
+end//
+delimiter ;
+
+drop procedure if exists get_student_best_course;
+call get_student_best_course(11);
+
+#---------------------------------------------------------------------------
 -- Detect Student Risk Level
 -- Create a stored procedure:
 -- get_student_risk_level
@@ -457,7 +504,6 @@ and v_status in ('dropped', 'completed')) then
 	signal sqlstate '45000'
     set message_text ='student status must not be dropped or completed';
 end if;
-
 
 select sum(amount_paid) into total_paid
 from payments 
