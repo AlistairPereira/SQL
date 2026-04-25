@@ -842,7 +842,74 @@ end as trend_flag
  from payments
  where amount_paid is not null;
  
+ #------------------------------------------------------------------------------
  
+--  CTE Question
+-- 🎯 Q: Courses with Above Average Enrollment
+-- 👉 Find courses that have more students enrolled than the average number of students per course
+-- 📊 Expected Output
+-- course_id | total_students | avg_students
+
+with t_studs as 
+(
+	select 
+		course_id, count(student_id) as total_students 
+	from enrollments
+	group by course_id
+),
+avg_studs as
+(
+	select 
+		avg(total_students) as avg_students
+	from t_studs
+)
+select * 
+from t_studs as t 
+cross join avg_studs as a
+where t.total_students > a.avg_students;
+
+#---------------------------------------------------------
+
+-- Q: Rank Courses by Revenue Within Category
+-- Find the highest revenue courses within each course category.
+-- Expected Output
+-- category | course_id | title | total_revenue | revenue_rank
+
+select 
+	c.category, 
+    c.course_id, c.title, 
+    sum(p.amount_paid) as total_revenue,
+	dense_rank() over (partition by c.category order by sum(p.amount_paid) desc) as revenue_rank
+ from courses as c
+join payments as p on c.course_id = p.course_id
+group by c.course_id;
+#------------------------------------------------
+with total_pay as
+(
+select 
+	c.category, 
+    c.course_id, c.title, 
+    sum(p.amount_paid) as total_revenue
+ from courses as c
+join payments as p on c.course_id = p.course_id
+where p.amount_paid is not null
+group by c.course_id,c.title, c.category
+),
+ranking as
+(
+select *,
+dense_rank() over (partition by category order by total_revenue) as rev_rank
+ from total_pay
+)
+select * from ranking;
+
+#---------------------------------------------------------------------------------
+
+
+
+
+
+
  
  
  
