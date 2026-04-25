@@ -4,6 +4,154 @@ select * from enrollments;
 select * from payments;
 select * from assessments;
 select * from courses;
+#-----------------------------------------------------------------
+-- Add Assessment Score Safely
+-- Create a procedure:
+-- add_assessment_with_validation
+-- ask
+-- Insert a new assessment record into assessments using transaction handling.
+-- Validations
+-- Before inserting:
+-- 1. Student must exist
+-- 2. Course must exist
+-- 3. Student must be enrolled in that course
+-- 4. Score must be between 0 and 100
+-- 5. Student should not already have an assessment for that same course on same date
+-- Transaction rule
+select * from assessments;
+delimiter //
+create procedure add_assessment_with_validation( in student_id_input int, in course_id_input int,
+in p_score decimal(5,2),
+    in p_date_taken date)
+begin
+
+
+declare exit handler for sqlexception
+begin
+rollback;
+signal sqlstate '45000'
+set message_text ="assessment addition failed";
+end;
+
+if not exists( select 1 from students
+where student_id = student_id_input) then 
+	signal sqlstate '45000'
+    set message_text = 'student does not exists';
+end if;
+
+if not exists(select 1 from courses 
+where course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text = 'course does not exists';
+end if;
+
+if not exists(select 1 from enrollments
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student not enrolled';
+end if;
+
+if p_score is null OR p_score < 0 OR p_score > 100 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'score should be between 0 and 100';
+    END IF;
+-- select score into p_score from assessments
+-- where student_id = student_id_input and course_id = course_id_input and score between 0 and 100
+-- and score is not null;
+
+-- if exists (select 1 from assessments
+-- where student_id = student_id_input and course_id = course_id_input and score not between 0 and 100
+-- and score is  null) then 
+-- 	signal sqlstate '45000'
+--     set message_text ='score shud be between 0 and 100 and not null';
+-- end if;
+
+select date_taken into p_date_taken from assessments
+where student_id = student_id_input and course_id = course_id_input;
+-- 5. Student should not already have an assessment for that same course on same date
+if exists (select 1 from assessments
+where student_id = student_id_input and course_id = course_id_input and date_taken = p_date_taken) then
+	signal sqlstate '45000'
+    set message_text ='student already has an assesmmnet on that date';
+end if;
+
+start transaction;
+insert into assessments (student_id, course_id, score, date_taken) values
+(student_id_input, course_id_input, p_score, p_date_taken);
+commit;
+
+end//
+delimiter ;
+CALL add_assessment_with_validation(3, 1002, 88.50, CURDATE());
+
+drop procedure if exists add_assessment_with_validation;
+alter table assessments
+modify assessment_id int auto_increment;
+select * from assessments;
+#----------------------------------------------------------------------------
+
+-- Student Course Detail Report
+-- Create procedure:
+-- get_student_course_detail
+-- Output
+-- student_id | student_name | course_id | course_title | instructor_name | enroll_date | status
+select * from instructors;
+select * from courses;
+delimiter //
+create procedure get_student_course_detail(in student_id_input int)
+begin
+select s.student_id, s.name, c.course_id, c.title, i.name, e.enroll_date, e.status
+ from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join courses as c on e.course_id = c.course_id
+left join instructors as i on i.instructor_id = c.instructor_id
+where s.student_id = student_id_input;
+end//
+delimiter ;
+
+call get_student_course_detail(5);
+
+#-----------------------------------------------------------------------------
+-- get Student Learning Health Repor
+-- Create a procedure:
+-- get_student_learning_health
+-- Output
+-- student_id | student_name | total_courses | completed_courses | dropped_courses | avg_score| total_paid | health_status
+
+delimiter //
+create procedure get_student_learning_health(in student_id_input int, out total_courses int, out comp int,
+out dropped int, out avg_score decimal(10,2), out total_paid decimal(10,2), out h_status varchar(50) )
+begin
+select count(e.course_id),
+count(case when e.status ="completed" then 1 end),
+count(case when e.status = "dropped" then 1 end) ,
+avg(a.score) ,
+sum(p.amount_paid),
+case
+	when count(case when e.status = "dropped" then 1 end) >= 2 then "high risk"
+    when avg(a.score) >= 80 and count(case when e.status ="completed" then 1 end) >= 2 then "excelent"
+    when avg(a.score) >= 60 and sum(p.amount_paid)> 300 then "good"
+    when count(e.course_id) =0 then "inactive"
+    else "need improvenmet"
+    end
+    into total_courses, comp, dropped, avg_score, total_paid, h_status
+    from enrollments as e 
+left join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+where e.student_id = student_id_input;
+end//
+delimiter ;
+
+set @total_courses =0;
+set @comp =0;
+set @dropped =0;
+set @avg_score =0.0;
+set @total_paid=0;
+set @h_status ="";
+call get_student_learning_health(2,@total_courses, @comp,@dropped,@avg_score,@total_paid,@h_status);
+select @total_courses, @comp,@dropped,@avg_score,@total_paid,@h_status;
+
+
 -- #-------------------------------------------------------------------------
 -- Top Performer Course for a Student
 -- Create a procedure:
