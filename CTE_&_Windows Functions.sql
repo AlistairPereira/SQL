@@ -905,6 +905,77 @@ select * from ranking;
 
 #---------------------------------------------------------------------------------
 
+-- Q: Students Who Paid Less Than Their Enrolled Course Total Price
+-- Find students whose total paid amount is less than the total price of all courses they enrolled in.
+-- Expected Output
+-- student_id | total_course_price | total_paid | pending_amount
+
+with total_pay as 
+(
+select student_id, amount_paid as total_paid 
+from payments
+where amount_paid is not null
+),
+overall_pay as 
+(
+select student_id, sum(total_paid) as total_price
+ from total_pay 
+group by student_id
+)
+select * from total_pay as t
+join overall_pay as o on t.student_id = o.student_id;
+#-------------------------------------------------------------
+
+with tc_price as
+(
+select e.student_id, sum(c.price) as total_course_price
+ from courses as c
+join enrollments as e on c.course_id = e.course_id
+group by e.student_id
+),
+stud_total_paid as 
+(
+select student_id, sum(amount_paid) as total_paid 
+from payments
+group by student_id
+)
+select *, 
+t.total_course_price - s.total_paid as pending_amount
+ from tc_price as t
+join stud_total_paid as s on t.student_id = s.student_id;
+-- where t.total_course_price > s.total_paid;
+
+#-----------------------------------------------------------------------
+
+-- Window Function Question
+-- 🎯 Q: Running Total of Payments per Student
+-- 👉 For each student, calculate a running (cumulative) total of payments over time
+-- 📊 Expected Output
+-- student_id | payment_date | amount_paid | running_total
+
+select student_id, payment_date, amount_paid, 
+sum(amount_paid) over (partition by student_id order by payment_date) as running_total
+ from payments;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
