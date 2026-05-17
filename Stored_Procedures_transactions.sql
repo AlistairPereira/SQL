@@ -208,6 +208,33 @@ call get_student_best_course(11);
 -- student_id | student_name | avg_score | total_courses | dropped_courses | risk_level
 
 delimiter //
+create procedure stud_risk_level(in student_id_input int, out avg_score decimal(10,2),
+out total_courses int, out dropped_courses int, out risk_level varchar(50))
+begin
+select avg(a.score),
+count(e.course_id),
+count(case when e.status ="dropped" then 1 end),
+case 
+	when count(case when e.status ="dropped" then 1 end) >= 2 then "high risk"
+    when avg(a.score) <= 60 then "medium risk"
+    when count(e.course_id) =0 then "inactive"
+    else "low risk"
+    end 
+into avg_score, total_courses, dropped_courses, risk_level
+ from enrollments as e
+join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+where e.student_id = student_id_input;
+end//
+delimiter ;
+
+set @avg_score =0.0;
+set @total_courses =0;
+set @dropped_courses =0;
+set @risk_level ="";
+call stud_risk_level(1, @avg_score, @total_courses, @dropped_cpurses, @risk_level);
+select @avg_score, @total_courses, @dropped_cpurses, @risk_level;
+
+delimiter //
 create procedure student_risk_level(in student_id_input int, out total_courses int, out dropped_courses int,
 out risk_level varchar(50), out avg_score decimal(10,2))
 begin
@@ -338,6 +365,29 @@ select * from courses;
 -- 👉 Number of students who failed
 -- 6. Pass Percentage
 -- (pass_count / total_students) * 100
+delimiter //
+create procedure course_perf()
+begin
+select c.course_id, c.title, count(distinct(e.student_id)) as total_students,
+avg(a.score) as avg_score, 
+count(case when a.score > 60 then 1 end) as pass_count,
+count(case when a.score < 60 then 1 end) as fail_count,
+count(case when a.score > 60 then 1 end)/count(e.student_id) * 100 as pass_percentage
+ from courses as c
+left join enrollments as e on c.course_id = e.course_id
+left join assessments as a on e.course_id = a.course_id and e.student_id = a.student_id
+-- where c.course_id = course_id_input
+group by c.course_id, c.title;
+end//
+delimiter ;
+
+drop procedure if exists course_perf;
+
+call course_perf();
+
+
+
+
 
 select c.course_id, count(distinct(e.student_id)),
 count(case when a.score >=60 then 1 end) as pass_count,

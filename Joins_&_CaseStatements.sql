@@ -5,6 +5,37 @@ select * from payments;
 select * from assessments;
 select * from courses;
 
+-- Question : Rank Students by Payment Completion
+-- Show each student’s total course price, total paid, pending amount, and payment category.
+-- Expected columns:
+-- student_id | student_name | total_course_price | total_paid | pending_amount | payment_category
+select * from payments;
+
+select 
+s.student_id, 
+s.name,
+sum(c.price) as course_price, 
+coalesce(sum(p.amount_paid),0) as total_paid ,
+abs(sum(p.amount_paid)-sum(c.price)) as pending_amount ,
+case 
+when sum(p.amount_paid) is null then "not paid"
+when abs(sum(p.amount_paid)-sum(c.price)) = 0 then "fully cleared"
+when abs(sum(p.amount_paid)-sum(c.price)) > 0 and abs(sum(p.amount_paid)-sum(c.price)) < 150 then "small pending"
+when abs(sum(p.amount_paid)-sum(c.price)) > 150 then "high pending"
+end as payment_category
+from students as s
+left join enrollments as e on e.student_id = s.student_id
+left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+left join courses as c on e.course_id = c.course_id
+group by s.student_id,s.name;
+
+select * from payments where student_id = 4;
+
+#------------------------------------------------------------------------
+
+
+
+#-------------------------------------------------------------------------
 -- Q1. Assessment Result
 -- Based on score:
 -- = 80 → "Excellent"
@@ -31,6 +62,15 @@ end as score_status
 select * from courses;
 select * from payments;
 
+select c.course_id,p.amount_paid, c.price,
+case
+when p.amount_paid is null then "pending"
+when p.amount_paid < c.price then "partial"
+else "completed"
+end as pay_status
+ from courses as c 
+left join payments as p on c.course_id = p.course_id;
+
 select p.payment_id,c.course_id, c.title,c.price , p.amount_paid,
 case
 when p.amount_paid is null then "pending"
@@ -42,6 +82,16 @@ left join payments as p on c.course_id = p.course_id;
 
 #----------------------------------------------------------------------------
 -- Write a SQL query to show number of students in each status per course
+select * from enrollments;
+
+select course_id, count(student_id) as total_students,
+count(case when status = "completed" then 1 end) as comp_count,
+count(case when status = "dropped" then 1 end) as drop_count,
+count(case when status = "in-progress" then 1 end) as inprog_count,
+count(case when  status is null then 1 end) as no_status,
+count(case when status = "completed" then 1 end)/count(student_id)*100 as comp_percent
+  from enrollments
+group by course_id;
 
 select course_id, count(student_id),
 count(case when status ="dropped" then 1 end) as dropped_courses,
@@ -59,6 +109,17 @@ group by course_id;
 -- 90 days → "Old"
 -- NULL → "Unknown"
 select * from students;
+select * from enrollments;
+
+select *,
+case when e.enroll_date is null then "unknown"
+when datediff(e.enroll_date, s.join_date) < 30 then "recent"
+when datediff(e.enroll_date, s.join_date) between 30 and 90 then "moderate"
+else "old"
+end as enroll_stats
+ from students as s
+join enrollments as e on s.student_id = e.student_id;
+
 
 select *,
 case
@@ -94,6 +155,21 @@ end as recency_tab
 -- 60–79	"Good"
 -- <60	"Poor"
 -- NULL avg_score	"No Data"
+
+
+select s.student_id, s.name,
+count(e.course_id) as total_courses,
+avg(a.score) as avg_score,
+case
+when avg(a.score) >= 80 then "excellent"
+when avg(a.score) between 60 and 79 then "good"
+when avg(a.score) < 60 then "poor"
+else "no data"
+end as perform_tag
+from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+group by s.student_id;
 
 select * from enrollments;
 
