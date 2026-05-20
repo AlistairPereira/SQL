@@ -204,6 +204,10 @@ INSERT INTO Payments (payment_id, student_id, course_id, amount_paid, payment_da
 -- Find first payment amount per student
 -- Show it on every row
 
+
+
+
+
 select * from (select student_id, course_id,payment_date, amount_paid,
 row_number() over (partition by student_id order by payment_date asc) as first_payment
 from payments) as p
@@ -744,6 +748,18 @@ where t.total_courses > a.avg_courses;
 -- 📊 Expected Output
 -- student_id | payment_date | amount_paid | prev_payment | diff | trend
 
+select student_id, course_id, payment_date , amount_paid as current_paid,
+lag(amount_paid) over (partition by student_id order by payment_date) as prev_payment,
+amount_paid - lag(amount_paid) over (partition by student_id order by payment_date) as diff,
+case 
+	when lag(amount_paid) over (partition by student_id order by payment_date) is null then "first_payment"
+    when amount_paid > lag(amount_paid) over (partition by student_id order by payment_date) then "increased"
+    when amount_paid < lag(amount_paid) over (partition by student_id order by payment_date) then "decreased"
+    else "same"
+    end as trend
+ from payments
+ where amount_paid is not null;
+
 select student_id, amount_paid, payment_date,
 lag(amount_paid) over (partition by student_id order by payment_date) as prev_payment,
 amount_paid - lag(amount_paid) over (partition by student_id order by payment_date) as diff,
@@ -792,6 +808,23 @@ select @total_courses,@avg_score,@high_scores,@low_scores,@performance_tag ;
 -- 👉 Find students whose latest score is higher than their first score
 -- 📊 Expected Output
 -- student_id | first_score | latest_score
+
+with eins as 
+(select * from (select student_id, date_taken, score as first_score,
+row_number() over (partition by student_id order by score asc) as first_score_rank
+ from assessments
+ where score is not null) as f
+ where first_score_rank = 1),
+ zwei as (
+ select * from (select student_id , date_taken, score as second_score, 
+ row_number() over (partition by student_id order by score desc) as latest_score_rank
+ from assessments) as l
+ where latest_score_rank = 1)
+ select * from eins as e
+ join zwei as z on e.student_id = z.student_id
+ where z.second_score > e.first_score;
+ 
+
 
 with ein_score as 
 (
@@ -956,6 +989,74 @@ join stud_total_paid as s on t.student_id = s.student_id;
 select student_id, payment_date, amount_paid, 
 sum(amount_paid) over (partition by student_id order by payment_date) as running_total
  from payments;
+
+
+-- #----------------------------------------------------------------------
+-- Question: Rank Students by Average Score
+-- Show each student’s average score and rank them from highest to lowest.
+-- Expected output
+-- student_id | student_name | avg_score | performance_rank | performance_category
+
+select s.student_id, s.name, avg(a.score)as avg_score ,
+dense_rank() over (order by avg(a.score) desc) as performance_rank ,
+case 
+when avg(a.score) is null then "no assessment"
+when avg(a.score) >= 85 then "top performer"
+when avg(a.score) between 50 and 84.99 then "Avg performer"
+when avg(a.score) < 50 then "low perfoemer"
+end as performance_tag
+from students as s
+left join assessments as a on s.student_id = a.student_id
+group by s.student_id,s.name;
+
+#--------------------------------------------------------------------
+
+-- Question: Top Student in Each Course
+-- Show each student’s score in each course and rank students inside each course.
+-- Expected output:
+-- course_id | course_title | student_id | student_name | score | course_rank | rank_status
+
+with stud_info as (
+select c.course_id, c.title, s.student_id, s.name,
+a.score,
+dense_rank() over (partition by c.course_id order by a.score desc) as course_rank
+ from students as s
+left join assessments as a on s.student_id = a.student_id
+left join courses as c on a.course_id = c.course_id
+where a.score is not null)
+select *,
+case when course_rank = 1 then "top scorer"
+when coursE_rank = 2 then "second"
+when course_rank =3 then "third"
+else "other"
+end as rank_status
+ from stud_info;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
