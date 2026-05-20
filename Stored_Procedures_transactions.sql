@@ -5,6 +5,85 @@ select * from payments;
 select * from assessments;
 select * from courses;
 #-----------------------------------------------------------------
+-- Question: Student Course Report by Student ID
+-- Create a stored procedure called:
+-- student_course_report
+-- Expected output columns
+-- student_id,student_name,course_id,course_title,enrollment_status,score,amount_paid,payment_status,result_status
+
+delimiter //
+create procedure stud_course_report(in student_id_input int)
+begin
+select s.student_id,s.name ,
+c.course_id, c.title, e.status,
+a.score, p.amount_paid,
+case
+when p.amount_paid is null then "payment pending"
+when p.amount_paid > c.price then "overpaid"
+when p.amount_paid < c.price then "underpaid"
+else "fully paid"
+end as payment_status,
+case
+when a.score is null then "assessment pending"
+when a.score < 60 then "fail"
+when a.score >= 60 then "pass"
+end as result_status
+  from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join courses as c on e.course_id = c.course_id
+left join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+where s.student_id = student_id_input;
+end//
+delimiter ;
+drop procedure if exists stud_course_report;
+
+call stud_course_report(1);
+#-----------------------------------------------------------------
+
+-- Question: Student Payment Summary with OUT Parameters
+-- Create a procedure called: student_payment_summary
+-- total_course_price 
+-- total_paid 
+-- pending_amount 
+-- payment_status
+
+delimiter //
+create procedure student_pay_summary(in student_id_input int, out course_price decimal(10,2),
+out total_paid decimal(10,2), out pend_amt decimal(10,2), out pay_status varchar(50))
+begin
+select sum(c.price),
+coalesce(sum(p.amount_paid),0),
+ sum(c.price)-coalesce(sum(p.amount_paid),0),
+ case
+	when coalesce(sum(p.amount_paid),0) =0 then "no payment"
+    when sum(c.price)-coalesce(sum(p.amount_paid),0) = 0 then "fully paid"
+    when sum(c.price)-coalesce(sum(p.amount_paid),0) > 0 and sum(c.price)-coalesce(sum(p.amount_paid),0) <= 150 then "small pending"
+    when sum(c.price)-coalesce(sum(p.amount_paid),0)> 150 then "high pending"
+    when sum(c.price)-coalesce(sum(p.amount_paid),0) < 0 then "overpaid"
+    end 
+ into course_price, total_paid, pend_amt , pay_status
+ from enrollments as e 
+left join courses as c on e.course_id = c.course_id
+left join payments as p on e.course_id =p.course_id and e.student_id = p.student_id
+where e.student_id = student_id_input;
+end//
+delimiter ;
+drop procedure if exists student_pay_summary;
+
+set @course_price =0.0;
+set @total_paid =0.0;
+set @pend_amt =0.0;
+set @pay_status="";
+call student_pay_summary(3,@course_price, @total_paid, @pend_amt, @pay_status);
+select @course_price, @total_paid, @pend_amt, @pay_status;
+
+select * from payments where student_id =4;
+select * from courses where course_id in (1003, 1005);
+#---------------------------------------------------------------------------
+
+
+#-----------------------------------------------------------------
 -- Add Assessment Score Safely
 -- Create a procedure:
 -- add_assessment_with_validation
@@ -18,14 +97,74 @@ select * from courses;
 -- 4. Score must be between 0 and 100
 -- 5. Student should not already have an assessment for that same course on same date
 -- Transaction rule
+
+delimiter //
+create procedure add_assessments(in student_id_input int, in course_id_input int, in p_score decimal(10,2),
+in p_date_taken date)
+begin
+
+declare exit handler for sqlexception
+begin
+rollback;
+signal sqlstate '45000'
+set message_text = "assessment addition failed";
+end;
+
+if not exists (select 1 from students
+where student_id = student_id_input) then 
+	signal sqlstate '45000'
+    set message_text = "student does not exists";
+end if;
+
+if not exists (select 1 from courses
+where course_id = course_id_input) then
+	signal sqlstate '45000'
+    set message_text = "course does not exists";
+end if;
+
+if not exists(select 1 from enrollments
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ="student not enrolled";
+end if;
+
+if p_score is null or p_score < 0 or p_score > 100 then 
+	signal sqlstate '45000'
+    set message_text ="score shud be between 0 and 100";
+end if;
+
+IF p_date_taken IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'assessment date is required';
+    END IF;
+    
+if exists (Select 1 from assessments
+where student_id =student_id_input and course_id = course_id_input and date_taken = p_date_taken) then
+	signal sqlstate '45000'
+    set message_text ="student already has an assesmmnet on that date";
+end if;
+
+start transaction;
+insert into assessments (student_id, course_id, score, date_taken) values
+(student_id_input, course_id_input, p_score, p_date_taken);
+commit;
+end//
+delimiter ;
+
+drop procedure if exists add_assessments;
+
+CALL add_assessments(8, 1002, 89.50, CURDATE());
+select * from assessments;
+
+
+
+
 select * from assessments;
 delimiter //
 create procedure add_assessment_with_validation( in student_id_input int, in course_id_input int,
 in p_score decimal(5,2),
     in p_date_taken date)
 begin
-
-
 declare exit handler for sqlexception
 begin
 rollback;
