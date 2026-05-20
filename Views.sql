@@ -6,7 +6,7 @@ select * from assessments;
 select * from courses;
 
 
-👉 -- A view is just a saved SELECT query
+-- A view is just a saved SELECT query
 
 -- Feature	                   View	                      Stored Procedure
 -- Type					Saved query	                       Program
@@ -174,14 +174,81 @@ drop view vw_student_value_tag;
 
 select * from vw_student_value_tag;
 
+#-------------------------------------------------------------
+-- vw_student_course_performance
+-- The view should show one row for each enrolled student-course combination.
+-- Expected columns
+-- student_id,student_name,city,course_id,course_title,course_category,instructor_name,enrollment_status
+-- score,amount_paid,course_price,payment_status,result_status,overall_status
+select * from courses;
+create view vw_student_course_performance as
+select s.student_id, s.name as student_name ,
+s.city, 
+c.course_id, c.title,c.category,
+i.name as instructor_name, e.status, a.score, p.amount_paid, c.price,
+case 
+	when p.amount_paid IS NULL then 'Payment Pending'
+	when p.amount_paid >= c.price  then 'Paid'
+	when p.amount_paid < c.price  then 'Partial Payment'
+	end as payment_status,
+case
+	when a.score IS NULL then 'Assessment Pending'
+	when a.score >= 60  then 'Pass'
+	when a.score < 60  then 'Fail'
+	end as result_status,
+case 
+	when e.status = 'completed' AND a.score >= 60 AND p.amount_paid >= price then  'Completed Successfully'
+	when e.status = 'completed' AND a.score < 60 then 'Completed but Failed'
+	when e.status = 'in-progress' then 'Currently Learning'
+	when e.status = 'dropped' then 'Dropped Course'
+    when p.amount_paid IS NULL then 'Payment Issue'
+    else 'Needs Review'
+end as overall_status
+ from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join courses as c on e.course_id = c.course_id
+left join instructors as i on i.instructor_id = c.instructor_id
+left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+left join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id;
 
+select * from vw_student_course_performance
+where payment_status ="paid" ;
 
+#--------------------------------------------------------
+select * from instructors;
+select * from courses;
 
+create view vw_course_revenue_summary as (
+select c.course_id, c.title,c.price, c.category, i.name,
+count(e.student_id) as total_students,
+coalesce(sum(p.amount_paid),0) as total_collected_amount,
+c.price * count(e.student_id) as total_expected_revenue,
+c.price * count(e.student_id) -coalesce(sum(p.amount_paid),0) as pending_amount,
+case when coalesce(sum(p.amount_paid),0) = 0
+	then 'No Revenue Collected'
 
+when c.price * count(e.student_id) -coalesce(sum(p.amount_paid),0)= 0
+    then 'Fully Collected'
 
+when c.price * count(e.student_id) -coalesce(sum(p.amount_paid),0) > 0 AND  
+c.price * count(e.student_id) -coalesce(sum(p.amount_paid),0) <= 200
+    then 'Small Pending Revenue'
 
+when c.price * count(e.student_id) -coalesce(sum(p.amount_paid),0) > 200
+    then 'High Pending Revenue'
 
+when c.price * count(e.student_id) -coalesce(sum(p.amount_paid),0) < 0
+    then  'Over Collected' 
+    end as revenue_status
+    from courses as c 
+left join instructors as i on c.instructor_id = i.instructor_id
+left join enrollments as e on e.course_id = c.course_id
+left join payments as p on e.course_id =p.course_id and e.student_id = p.student_id
+group by c.course_id);
 
+drop view vw_course_revenue_summary;
+
+select * from vw_course_revenue_summary;
 
 
 
