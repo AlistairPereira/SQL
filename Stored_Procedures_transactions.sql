@@ -4,6 +4,242 @@ select * from enrollments;
 select * from payments;
 select * from assessments;
 select * from courses;
+#---------------------------------------------------------------
+-- Create a procedure called: course_performance_summary
+-- For a given course, calculate:
+
+-- total_students = total enrolled students
+-- avg_score = average assessment score
+-- pass_count = students with score >= 60
+-- fail_count = students with score < 60
+-- course_status = based on avg_score and total_students
+-- Validations
+
+-- Before calculation:
+-- Course must exist.
+-- Course must have at least one enrolled student.
+
+delimiter //
+create procedure course_performance_summary(in course_id_input int, out total_students int, out avg_score decimal(10,2),
+out pass_count int, out fail_count int, out course_status varchar(50))
+begin
+
+declare exit handler for sqlexception
+begin
+signal sqlstate '45000'
+set message_text ='course does not exits or student not enrolled';
+end;
+
+if not exists(select 1 from courses
+where course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='course does not exists';
+end if;
+
+select count(student_id) into total_students from enrollments
+where course_id =course_id_input ;
+
+if total_students < 1 then 
+	signal sqlstate '45000'
+    set message_text = 'course must have atleast 1 student enrolled';
+end if;
+
+select count(e.student_id), avg(a.score),
+count(case when a.score >= 60 then 1 end),
+count(case when a.score < 60 then 1 end),
+case when avg(a.score) IS NULL
+    then  'No Assessment Data'
+when avg(a.score) >= 80
+    then 'Excellent Course Performance'
+
+when avg(a.score) >= 60 AND avg(a.score) < 80
+    then 'Good Course Performance'
+
+when avg(a.score) < 60
+    then 'Poor Course Performance'
+    end
+into total_students, avg_score, pass_count, fail_count,course_status
+    from enrollments as e
+left join assessments as a on e.course_id = a.course_id and e.student_id = a.student_id
+where e.course_id = course_id_input;
+
+end//
+delimiter ;
+
+CALL course_performance_summary(
+    1006,
+    @total_students,
+    @avg_score,
+    @pass_count,
+    @fail_count,
+    @course_status
+);
+SELECT 
+    @total_students AS total_students,
+    @avg_score AS avg_score,
+    @pass_count AS pass_count,
+    @fail_count AS fail_count,
+    @course_status AS course_status;
+    
+#---------------------------------------------------------------
+-- Create a procedure called: make_course_payment_safe
+
+-- Insert a new payment into the payments table safely.
+
+-- Validations before insert
+-- Student must exist.
+-- Course must exist.
+-- Student must be enrolled in that course.
+-- Payment amount must be greater than 0.
+-- Payment date cannot be NULL.
+-- Student should not already have a payment record for the same course.
+
+delimiter //
+create procedure make_course_payment_safe(in student_id_input int, in course_id_input int, in p_amount_paid decimal(10,2),
+in payment_date date)
+begin
+declare exit handler for sqlexception
+begin
+rollback;
+signal sqlstate '45000'
+set message_text = 'new payments cannot be added in payments table';
+end;
+
+start transaction;
+
+if not exists(select 1 from students
+where student_id = student_id_input)then 
+	signal sqlstate '45000'
+    set message_text ='student does not exists';
+end if;
+
+if not exists(select 1 from courses
+where course_id = course_id_input)then 
+	signal sqlstate '45000'
+    set message_text ='course does not exists';
+end if;
+
+if not exists( select 1 from enrollments
+where student_id = student_id_input and course_id = course_id_input) then
+	signal sqlstate '45000'
+    set message_text ='student not enrolled';
+end if;
+
+if p_amount_paid is null or p_amount_paid <= 0 then 
+	signal sqlstate '45000'
+    set message_text = 'payment amount shud be greater than 0';
+end if;
+
+if payment_date is null then 
+	signal sqlstate '45000'
+    set message_text ='payment date cannot be null';
+end if;
+
+if exists (select 1 from payments
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text = 'Student has a payment record for the same course';
+end if;
+
+
+insert into payments ( student_id, course_id, amount_paid, payment_date) values
+(student_id_input, course_id_input, p_amount_paid, payment_date);
+commit;
+
+end//
+delimiter ;
+
+
+alter table payments
+modify payment_id int auto_increment;
+
+CALL make_course_payment_safe(4, 1006, 195.97, CURDATE());
+
+SELECT *
+FROM payments
+WHERE student_id = 4
+  AND course_id = 1006;
+  
+  select * from payments;
+
+#---------------------------------------------------------------
+
+-- Task
+-- Update the status in the enrollments table for the given student and course.
+-- Validations before update
+-- Student must exist.
+-- Course must exist.
+-- Enrollment must exist for that student and course.
+-- New status must be only one of these:
+-- 'completed'
+-- 'in-progress'
+-- 'dropped'
+-- If current status is already 'completed', do not allow changing it to 'dropped'.
+-- Transaction rule
+-- Use transaction handling:
+
+delimiter //
+create procedure update_enrollment_status_safe(in student_id_input int, in course_id_input int,
+in p_new_status varchar(50))
+begin
+
+declare current_status varchar(50);
+declare exit handler for sqlexception
+begin
+rollback;
+signal sqlstate '45000'
+set message_text ='enrollment status updation failed';
+end;
+
+if not exists(select 1 from students
+where student_id = student_id_input) then 
+	signal sqlstate '45000'
+    set message_text ="student does not exists";
+end if;
+
+if not exists(select 1 from courses
+where course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='course does not exists';
+end if;
+
+if not exists (Select 1 from enrollments
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text = 'student not enrolled';
+end if;
+
+select status into current_status from enrollments a
+where student_id = student_id_input and course_id = course_id_input;
+
+if p_new_status not in ('completed', 'dropped', 'in-progress') then 
+	signal sqlstate '45000'
+    set message_text = 'status not matched';
+end if;
+
+if current_status = 'completed' and p_new_status = 'dropped' then 
+	signal sqlstate '45000'
+    set message_text='compketed status cannot be chnaged to dropped';
+end if;
+
+start transaction;
+update enrollments set status = p_new_status where 
+student_id = student_id_input and course_id = course_id_input;
+commit;
+
+end//
+delimiter ;
+
+drop procedure if exists update_enrollment_status_safe;
+
+call update_enrollment_status_safe(3,1002,'dropped');
+CALL update_enrollment_status_safe(4, 1003, 'dropped');
+select * from enrollments;
+SELECT *
+FROM enrollments
+WHERE student_id = 4
+  AND course_id = 1003;
+
 #-----------------------------------------------------------------
 -- Question: Student Course Report by Student ID
 -- Create a stored procedure called:
