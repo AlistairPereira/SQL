@@ -179,7 +179,78 @@ select * from enrollments;
 update enrollments set status = "dropped" where enrollment_id = 535;
 select * from enrollment_status_log;
 #----------------------------------------------------
+-- Trigger Question: Auto Log New Payments
+-- Create a trigger that automatically logs every new payment inserted into the payments table.
+CREATE TABLE payment_insert_log (
+    log_id INT AUTO_INCREMENT PRIMARY KEY,
+    payment_id INT,
+    student_id INT,
+    course_id INT,
+    amount_paid DECIMAL(10,2),
+    payment_date DATE,
+    logged_at DATETIME
+);
 
+delimiter //
+create trigger log_new_payment_insert
+after insert on payments
+for each row
+begin
+insert into payment_insert_log (payment_id,student_id,course_id,amount_paid,payment_date,logged_at)
+values(new.payment_id, new.student_id, new.course_id, new.amount_paid, curdate(), now());
+end//
+delimiter ;
+
+select * from payments;
+INSERT INTO payments (student_id, course_id, amount_paid, payment_date)
+VALUES (4, 1006, 195.97, CURDATE());
+select * from payment_insert_log;
+
+#--------------------------------------------------------
+-- Trigger Question: Stop Invalid Assessment Score
+-- Create a trigger to stop invalid score values before inserting into assessments.
+-- Rule
+-- score can be NULL
+-- but if score is entered, it must be between 0 and 100
+
+delimiter //
+create trigger stop_invalid_score
+before insert on assessments
+for each row
+begin
+if new.score < 0 or new.score > 100 then 
+	signal sqlstate '45000'
+    set message_text ='score shud be between 0 and 100   ';
+end if;
+end//
+delimiter ;
+#--------------------------------------------------------
+
+-- Trigger Question: Prevent Deleting Students Who Have Payments
+-- Create a trigger that stops deleting a student if that student has any payment records.
+-- Trigger name
+
+delimiter //
+create trigger prevent_student_delete_if_payments_exist
+before delete on students
+for each row
+begin
+if exists (select 1 from payments
+	where student_id = old.student_id
+    and amount_paid is not null 
+    and amount_paid > 0)
+    then 
+signal sqlstate '45000'
+set message_text ='cannot delete student that has paid ';
+end if;
+end//
+delimiter ;
+
+select * from payments;
+
+delete from students where student_id =3;
+
+#-----------------------------------------------------
 -- Question: Auto-Set Default Enrollment Status
 -- When a new enrollment is inserted:
 -- If status is NULL
