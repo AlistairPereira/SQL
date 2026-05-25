@@ -190,9 +190,235 @@ INSERT INTO Payments (payment_id, student_id, course_id, amount_paid, payment_da
 (926, 13, 1005, 130.43, '2023-06-05'),
 (927, 13, 1003, 171.07, '2023-03-19'),
 (928, 14, 1002, 140.56, '2023-04-05');
+#-----------------------------------------------------------------------------
+-- Question: Find Each Instructor’s Best Course by Average Score
+-- You need to show each instructor’s courses, average score per course, and rank courses inside each instructor.
+-- Expected outputinstructor_id,instructor_name,course_id,course_title,total_students,avg_score,course_rank,course_performance
+
+with instructor_info as 
+(
+	select 
+		i.instructor_id, i.name as instructor_name,
+		c.course_id, c.title
+	 from instructors as i
+	left join courses as c on i.instructor_id = c.instructor_id
+),
+course_info as 
+(
+	select 
+		e.course_id, 
+		count(distinct e.student_id) as total_students,
+		avg(a.score) as avg_score 
+	from enrollments as e
+	left join assessments as a on e.course_id = a.course_id and e.student_id = a.student_id
+	group by e.course_id
+),
+ranking as 
+(
+	select i.instructor_id, 
+		i.instructor_name ,i.course_id, i.title,c.total_students
+		,c.avg_score,
+		dense_rank() over (partition by i.instructor_id order by c.avg_score desc) as course_rank
+	from instructor_info as i
+	left join course_info as c on i.course_id = c.course_id
+)
+select * ,
+	case 
+		when course_rank = 1 AND avg_score >= 80
+		then 'Instructor Best Course'
+		when course_rank = 1 AND avg_score < 80
+		then 'Best but Needs Improvement'
+		when course_rank = 2
+		then 'Second Best Course'
+		when avg_score IS NULL
+		then 'No Assessment Data'
+		else
+		 'Other Course'
+     end as course_performance
+from ranking;
 
 
 
+select e.course_id, count( distinct e.student_id) as total_students,
+avg(a.score) as avg_score from enrollments as e
+left join assessments as a on e.course_id = a.course_id and e.student_id = a.student_id
+group by e.course_id;
+
+select * from enrollments where course_id = 1004;
+select * from assessments where course_id = 1001;
+#----------------------------------------------------------------------------
+-- Window Function Question: Compare Student Payments with Previous Payment
+-- Show each student’s payment history and compare each payment with their previous payment.
+-- Expected outputstudent_id,student_name,payment_id,course_id,amount_paid,payment_date,previous_payment_amount,payment_difference,
+-- payment_trend
+
+with student_pay_info as (
+select s.student_id, s.name,
+p.payment_id, p.course_id, p.amount_paid as current_payment, p.payment_date,
+lag(amount_paid) over (partition by student_id order by payment_date asc) as previous_payment_amount,
+p.amount_paid - lag(amount_paid) over (partition by student_id order by payment_date asc) as payment_difference
+ from students as s
+left join payments as p on s.student_id = p.student_id)
+select *,
+	case 
+	when previous_payment_amount IS NULL
+		 then 'First Payment'
+	when current_payment > previous_payment_amount
+		then  'Payment Increased'
+	when current_payment < previous_payment_amount
+		then 'Payment Decreased'
+	when current_payment = previous_payment_amount
+		then 'Same Payment' 
+	end as payment_trend
+from student_pay_info;
+
+
+#-----------------------------------------------------------------------------
+-- Question: Find Each City’s Top Student by Average Score
+-- Show students with their average score, then rank students inside each city.
+-- Expected output
+-- city | student_id | student_name | avg_score | city_rank | performance_status
+select * from students;
+select * from courses;
+
+with stud_info as
+(
+	select 
+		s.city,
+		s.student_id,s.name as student_name,
+		avg(a.score) as avg_score 
+	from students as s
+	left join assessments as a on s.student_id = a.student_id
+	group by s.student_id,s.name,s.city
+),
+ranking as 
+	( 
+	select *,
+		dense_rank() over (partition by city order by avg_score desc) as city_rank
+	 from stud_info)
+ select *,
+ case 
+	 when city_rank = 1 AND avg_score >= 80  then 'City Top Performer'
+	when city_rank = 1 AND avg_score < 80 then 'City Top but Needs Improvement'
+	when city_rank = 2 then 'Second Best in City'
+	when city_rank > 2 then 'Other Student'
+	when avg_score IS null then 'No Assessment'
+	end as performance_status
+from ranking;
+
+#------------------------------------------------------------------------------
+-- Question: Find Highest Revenue Student in Each City
+-- Show each student’s total paid amount, then rank students inside each city based on total payment.
+-- Expected output
+-- city | student_id | student_name | total_paid | city_payment_rank | payment_level
+
+with stud_info as (
+select
+	 s.city,s.student_id,
+	 s.name, 
+	 sum(p.amount_paid) as total_paid
+  from students as s
+left join payments as p on s.student_id = p.student_id
+group by s.student_id, s.name, s.city),
+city_ranking as
+(
+select *,
+dense_rank() over (partition by city order by total_paid desc) as  city_payment_rank
+ from stud_info)
+select *,
+case when city_payment_rank = 1 AND total_paid > 300
+    then 'Top Paying Student'
+
+when city_payment_rank = 1 AND total_paid <= 300
+    then 'Top in City but Low Payment'
+
+when city_payment_rank = 2
+    then 'Second Highest Payer'
+
+when city_payment_rank > 2
+    then 'Other Student'
+
+when total_paid = 0
+    then  'No Payment'
+end as payment_level
+from city_ranking;
+
+#-------------------------------------------------------------------------------
+
+-- Find Top Performing Course per Student
+-- Show each student’s courses with their score, then rank the courses inside each student based on score.
+-- Expected output
+-- student_id | student_name | course_id | course_title | score | student_course_rank | performance_status
+
+with stud_info as 
+(
+	select 
+		s.student_id, s.name, c.course_id, c.title, a.score 
+	from students as s
+	left join assessments as a on s.student_id = a.student_id
+	join courses as c on a.course_id = c.course_id
+),
+ranking as 
+(select *, 
+	dense_rank() over (partition by student_id order by score desc) as student_course_rank
+from stud_info)
+select *,
+case
+	when score IS NULL  then 'Not Attempted'
+	when student_course_rank = 1  AND score >= 80  then 'Best Strong Course'
+	when student_course_rank = 1 AND score < 80  then 'Best But Needs Improvement'
+	when student_course_rank = 2 then 'Second Best Course'
+	when student_course_rank > 2  then 'Other Course'
+    end as performance_status
+from ranking;
+#-----------------------------------------------------------------------------
+-- CTE Question: Find Courses Performing Below Platform Average
+-- Create a query to find courses whose average score is below the overall platform average score.
+-- Expected output
+-- course_id | course_title | course_avg_score | platform_avg_score | total_students | performance_status
+
+with course_info as 
+(
+	select 
+		c.course_id, 
+		c.title,
+		count(e.student_id) as total_students,
+		avg(a.score) as course_avg_score
+	from courses as c
+	left join assessments as a on c.course_id = a.course_id
+	left join enrollments as e on e.course_id = a.course_id and e.student_id = a.student_id
+	group by c.course_id),
+platform_info as
+	(
+		select 
+			avg(score)  as platform_avg_score
+		from assessments
+	)
+select *,c.title,
+case 
+	when c.course_avg_score IS NULL
+    then 'No Assessment Data'
+	when c.course_avg_score < p.platform_avg_score
+    then 'Below Platform Average'
+	when c.course_avg_score = p.platform_avg_score
+    then 'Equal to Platform Average'
+	when c.course_avg_score > p.platform_avg_score
+    then 'Above Platform Average'
+    end as performance_status
+    from platform_info as p
+cross join course_info as c
+where c.course_avg_score > p.platform_avg_score;
+
+select 
+avg(score)  as platform_avg_score
+from assessments;
+#----------------------------------------------------------------------------------------------------------
+
+
+
+
+
+#--------------------------------------------------------------------------------------------------------------
 -- QUESTION: Detect First Payment per Student
 -- 🎯 Task
 -- For each student:
