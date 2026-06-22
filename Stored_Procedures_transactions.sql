@@ -4,6 +4,399 @@ select * from enrollments;
 select * from payments;
 select * from assessments;
 select * from courses;
+
+-- Simple rule
+
+-- Use OUT when you want one value:
+
+-- total_revenue
+-- average_score
+-- student_status
+-- 1. OUT is good when answer is ONE value
+
+-- Example question:
+-- What is the total amount paid by student 1?
+-- Answer is one value:
+-- Do not use OUT when you want many rows:
+
+-- payment list
+-- student list
+-- course list
+-- report table
+-- 2. OUT is NOT good when answer is many rows
+
+-- Example question:
+-- Show all payments between two dates.
+-- Answer is a table/list:
+#--------------------------------------------------------------------------------
+-- Stored Procedure Question: make_course_payment
+-- Create a stored procedure that records a student’s payment for a course.
+-- Insert a new payment record into the payments table safely using:
+-- Validations before inserting
+-- Before inserting payment:
+-- 1. Student must exist
+-- 2. Course must exist
+-- 3. Student must be enrolled in that course
+-- 4. Payment amount must be greater than 0
+-- 5. Payment date cannot be in the future
+-- 6. Student should not overpay
+-- then throw error:
+-- Payment exceeds course price
+-- Insert rule
+-- If all validations pass, insert into payments.
+-- Expected insert columns:payment_id,course_id,amount_paid,payment_date
+
+delimiter //
+create procedure make_course_payment(in student_id_input int, in course_id_input int, in pay_amount decimal(10,2),
+in p_date_taken date)
+begin
+declare course_price decimal(10,2);
+declare already_paid decimal(10,2);
+
+declare exit handler for sqlexception
+begin
+	rollback;
+    resignal;
+end;
+
+start transaction;
+if not exists (select 1 from students
+where student_id = student_id_input) then
+	signal sqlstate '45000'
+    set message_text ='student does not exists';
+end if;
+
+if not exists(select 1 from courses
+where course_id = course_id_input)then 
+	signal sqlstate '45000'
+    set message_text ='course does not exists';
+end if;
+
+if not exists( select 1 from enrollments
+where student_id = student_id_input and course_id = course_id_input) then
+	signal sqlstate '45000'
+    set message_text ='student not enrolled';
+end if;
+
+if pay_amount < 0 or pay_amount is null then 
+	signal sqlstate '45000'
+    set message_text ='pay amount shud be > then 0';
+end if;
+
+if p_date_taken > curdate() then 
+	signal sqlstate '45000'
+    set message_text ='payment date cannot be a future date';
+end if;
+
+select 
+price into course_price 
+from courses
+where course_id = course_id_input;
+
+select 
+coalesce(sum(amount_paid),0) into already_paid 
+from payments
+where student_id = student_id_input and course_id = course_id_input;
+
+if already_paid+pay_amount > course_price then 
+	signal sqlstate '45000'
+    set message_text ='amount overpaid';
+end if;
+
+insert into payments (student_id,course_id,amount_paid,payment_date)
+values (student_id_input,course_id_input,pay_amount,p_date_taken);
+commit;
+
+select 'payment added successfully' as message;
+
+end//
+delimiter ;
+
+drop procedure if exists make_course_payment;
+call make_course_payment(13,1005,40,curdate());
+
+select * from payments;
+
+
+
+
+#--------------------------------------------------------------
+-- Stored Procedure Question:get_course_performance_by_category
+-- Create a stored procedure that takes one input:
+-- category_input VARCHAR(50)
+-- Example:
+-- CALL get_course_performance_by_category('Frontend');
+-- Expected Outputcourse_id,course_title,category,instructor_name,total_enrollments,completed_count,dropped_count
+-- avg_score,total_revenue,course_rank,performance_status
+
+delimiter //
+create procedure get_course_performance_by_category(in course_cat varchar(100))
+begin
+with enroll_data as
+(
+	select 
+    c.course_id, c.title, c.category ,i.name as instructor_name,
+    count(e.student_id) as total_enrollments,
+    count(case when e.status = "completed" then 1 end) as completed_count,
+    count(case when e.status = "dropped" then 1 end) as dropped_count
+    from courses as c 
+	left join enrollments as e on c.course_id = e.course_id
+	left join instructors as i on c.instructor_id = i.instructor_id
+	where c.category = course_cat
+    group by c.course_id,c.title, c.category 
+),
+assess_data as
+(select 
+    c.course_id, c.title, c.category ,i.name as instructor_name,
+	avg(a.score) as avg_score
+    from courses as c 
+	left join assessments as a on c.course_id = a.course_id
+	left join instructors as i on c.instructor_id = i.instructor_id
+	where c.category = course_cat
+    group by c.course_id,c.title, c.category 
+),
+pay_data as
+(
+select 
+    c.course_id, c.title, c.category ,i.name as instructor_name,
+	coalesce(sum(p.amount_paid),0) as total_paid
+    from courses as c 
+	left join payments as p on c.course_id = p.course_id
+	left join instructors as i on c.instructor_id = i.instructor_id
+	where c.category = course_cat
+    group by c.course_id,c.title, c.category 
+)
+	select 
+		e.course_id,e.title, e.category,e.total_enrollments,e.instructor_name,
+		e.completed_count,e.dropped_count
+		,a.avg_score, p.total_paid,
+		dense_rank() over ( order by p.total_paid desc) as course_rank ,
+		case 
+			when e.total_enrollments = 0 then 'No Enrollments'
+			when e.dropped_count >= 2 then 'High Drop Risk'
+			when a.avg_score >= 80 and p.total_paid >= 300 then 'Top Performing'
+			when a.avg_score >= 60 then 'Average Performing'
+			else  'Needs Improvement'
+		end as performance_status
+	from enroll_data as e
+	join assess_data as a on e.course_id = a.course_id
+	join pay_data as p on e.course_id = p.course_id
+	where e.category = course_cat;
+
+end//
+delimiter ;
+
+drop procedure if exists get_course_performance_by_category;
+
+call get_course_performance_by_category("Frontend");
+
+
+
+#----------------------------------------------------------------
+-- Question 5: Stored Procedure with LIMIT Input
+-- get_top_n_students_by_payment
+-- Create a procedure that takes one input:
+-- top_n_input
+-- Example:CALL get_top_n_students_by_payment(5);
+-- Expected output:student_id,student_name,city,total_paid,payment_rank
+drop procedure if exists get_top_n_students_by_payment;
+
+delimiter //
+create procedure get_top_n_students_by_payment(in top_n int)
+begin
+select s.student_id, s.name,s.city, 
+coalesce(sum(p.amount_paid),0) as total_paid ,
+dense_rank() over (order by sum(p.amount_paid) desc) as payment_rank
+from students as s
+left join payments as p on s.student_id = p.student_id
+group by s.student_id,s.name,s.city
+order by coalesce(sum(p.amount_paid),0) desc
+limit top_n;
+end//
+delimiter ;
+
+call get_top_n_students_by_payment(5);
+
+
+#--------------------------------------------------------------
+
+-- Question 3: Stored Procedure with IF / ELSE
+-- check_course_price_level
+-- Create a procedure that takes course_id_input as input and returns course price level.
+-- Expected output:course_id | course_title | price | price_level
+drop procedure if exists check_course_price_level;
+
+delimiter //
+create procedure check_course_price_level(in course_id_input int)
+begin
+declare price_level varchar(100);
+declare course_price decimal(10,2);
+declare course_title varchar(100);
+
+select price,title 
+into course_price, course_title 
+from courses
+where course_id = course_id_input;
+
+if course_price >= 180 then 
+set price_level ="expenisve";
+
+elseif course_price >= 140 then
+set price_level = "medium";
+
+else 
+set price_level = "low";
+end if;
+
+select course_id_input as course_id,
+course_price as price, course_title as title, price_level;
+
+end//
+delimiter ;
+
+call check_course_price_level(1006);
+
+
+
+#-----------------------------------------------------------------
+-- Question 1: Stored Procedure with Date Range
+-- get_payments_between_dates
+-- Create a procedure that takes two input dates:
+-- start_date_input
+-- end_date_input
+-- Return all payments made between those dates.
+-- Expected output:payment_id,student_name,course_title,amount_paid,payment_date,payment_status
+select * from payments;
+drop procedure if exists get_payments_between_dates;
+
+delimiter //
+create procedure get_payments_between_dates(in start_date_input date, in end_date_input date)
+begin
+select 
+p.payment_id, p.student_id, 
+c.title, p.amount_paid, p.payment_date,
+case when p.amount_paid is null then "not paid"
+when p.amount_paid > 0 then "paid"
+end as payment_status
+ from payments as p
+join students as s on p.student_id = s.student_id
+join courses as c on p.course_id = c.course_id
+where p.payment_date between start_date_input and end_date_input;
+end//
+delimiter ;
+
+set @payment_status ="";
+call get_payments_between_dates("2023-02-19","2023-05-03");
+
+
+select * from payments;
+
+#----------------------------------------------------------------
+-- Question 2: Stored Procedure with Category Filter
+-- Create a procedure that takes category name as input.
+-- Example:CALL get_courses_by_category('Frontend');
+-- Expected output:course_id,course_title,category,price,instructor_name,total_enrollments
+-- Rules:
+-- Show only courses from that category.
+-- Even if course has no enrollments, it should still appear.
+select * from courses;
+select * from instructors;
+drop procedure if exists get_courses_by_category;
+
+delimiter //
+create procedure get_courses_by_category(in course_cat varchar(50))
+begin
+select c.course_id, c.title,c.category, c.price, i.name, 
+count(e.student_id) as total_enrollments
+ from courses as c
+right join instructors as i on c.instructor_id = i.instructor_id
+join enrollments as e on e.course_id = c.course_id
+where c.category = course_cat
+group by c.course_id,c.title,c.category,c.price,i.name;
+end//
+delimiter ;
+
+call get_courses_by_category("Frontend");
+
+
+
+
+
+
+
+#---------------------------------------------------------------
+-- Question: Enroll Student Safely
+
+-- Create a stored procedure called: enroll_student_safe
+-- It should insert a new row into the enrollments table using transaction handling.
+-- Before inserting, check:
+-- 1. Student must exist in students table
+-- 2. Course must exist in courses table
+-- 3. Enroll date cannot be NULL
+-- 4. Status must be only:
+--    'completed', 'in-progress', 'dropped'
+-- 5. Student should not already be enrolled in the same course
+select * from enrollments;
+
+delimiter //
+create procedure enroll_student_safely(in student_id_input int, in course_id_input int, in p_status varchar(50), 
+in p_enroll_date date)
+begin
+
+declare exit handler for sqlexception
+begin
+rollback;
+signal sqlstate '45000'
+set message_text ='student enrollment failed ';
+end;
+
+start transaction;
+
+if not exists(select 1 from students
+where student_id = student_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student does not exists';
+end if;
+
+if not exists(select 1 from courses
+where course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='course does not exists';
+end if;
+
+if p_enroll_date is null then 
+	signal sqlstate '45000'
+    set message_text ="enroll_date cannot be null";
+end if;
+
+if p_status not in ('completed', 'in-progress', 'dropped') then 
+	signal sqlstate '45000'
+    set message_text ="status shiud be 'completed', 'in-progress', 'dropped'";
+end if;
+
+-- 5. Student should not already be enrolled in the same course
+
+if exists (select 1 from enrollments
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student cannot be enrolled in the same course';
+end if;
+
+
+insert into enrollments ( student_id, course_id, enroll_date, status) values
+(student_id_input, course_id_input, p_enroll_date, p_status);
+commit;
+end//
+delimiter ;
+
+CALL enroll_student_safely(2, 1003, 'in-progress', CURDATE());
+CALL enroll_student_safely(1, 1006, 'completed', CURDATE());
+select * from enrollments;
+
+
+alter table enrollments
+modify enrollment_id int auto_increment;
+
 #---------------------------------------------------------------
 -- Create a procedure called: course_performance_summary
 -- For a given course, calculate:
@@ -51,12 +444,10 @@ case when avg(a.score) IS NULL
     then  'No Assessment Data'
 when avg(a.score) >= 80
     then 'Excellent Course Performance'
-
 when avg(a.score) >= 60 AND avg(a.score) < 80
     then 'Good Course Performance'
-
 when avg(a.score) < 60
-    then 'Poor Course Performance'
+    then 'Poor Course Performance' 
     end
 into total_students, avg_score, pass_count, fail_count,course_status
     from enrollments as e
@@ -335,6 +726,71 @@ select * from courses where course_id in (1003, 1005);
 -- Transaction rule
 
 delimiter //
+create procedure adding_assessment(in student_id_input int, in course_id_input int, in p_score decimal(10,2),
+in p_date_taken date)
+begin
+
+declare exit handler for sqlexception
+begin
+	rollback;
+	resignal;
+end;
+
+start transaction;
+
+if not exists (Select 1 from students
+where student_id = student_id_input) then
+	signal sqlstate '45000'
+	set message_text = "student does not exists";
+end if;
+
+if not exists(select 1 from courses
+where course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text = "course does not exists";
+end if;
+
+-- 3. Student must be enrolled in that course
+
+if not exists (select 1 from enrollments 
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student not enrolled';
+end if;
+
+-- 4. Score must be between 0 and 100
+select score into p_score from assessments
+where student_id = student_id_input and course_id = course_id_input
+and score is not null;
+
+if p_score is null or p_score < 0 or p_score > 100 then
+	signal sqlstate '45000'
+    set message_text ='score must be between 0 and 100';
+end if;
+
+-- 5. Student should not already have an assessment for that same course on same date
+
+if exists (select 1 from assessments 
+where student_id = student_id_input and course_id = course_id_input and date_taken = p_date_taken) then
+	signal sqlstate '45000'
+    set message_text ='student has an assessment on that day for the course';
+end if;
+
+insert into assessments (student_id, course_id, score, date_taken) values
+(student_id_input, course_id_input, p_score, p_date_taken);
+
+commit;
+SELECT 'Assessment added successfully' AS message;
+end//
+delimiter ;
+
+drop procedure if exists adding_assessment;
+
+call adding_assessment(1,1005,34,"2023-05-25");
+
+select * from assessments;
+
+delimiter //
 create procedure add_assessments(in student_id_input int, in course_id_input int, in p_score decimal(10,2),
 in p_date_taken date)
 begin
@@ -384,6 +840,8 @@ start transaction;
 insert into assessments (student_id, course_id, score, date_taken) values
 (student_id_input, course_id_input, p_score, p_date_taken);
 commit;
+
+select  'Assessment added successfully' as message;
 end//
 delimiter ;
 
@@ -492,6 +950,52 @@ call get_student_course_detail(5);
 -- get_student_learning_health
 -- Output
 -- student_id | student_name | total_courses | completed_courses | dropped_courses | avg_score| total_paid | health_status
+drop procedure if exists student_learn_health;
+
+delimiter //
+create procedure student_learn_health(in student_id_input int, out total_courses int, out comp int, out dropped int, 
+out avg_score decimal(10,2), out total_paid decimal(10,2) , out health_status varchar(50))
+begin
+select
+count(e.course_id) ,
+count(case when e.status ="completed" then 1 end) ,
+count(case when e.status ="dropped" then 1 end) ,
+round(avg(a.score),2),
+coalesce(sum(p.amount_paid),0),
+case
+	when count(case when e.status = "dropped" then 1 end) >= 2 then "high risk"
+    when avg(a.score) >= 80 and count(case when e.status ="completed" then 1 end) >= 2 then "excelent"
+    when avg(a.score) >= 60 and sum(p.amount_paid)> 300 then "good"
+    when count(e.course_id) =0 then "inactive"
+    else "need improvenmet"
+    end
+into total_courses, comp,dropped,avg_score,total_paid, health_status
+ from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+where s.student_id = student_id_input;
+
+select s.name, total_courses, comp as completed_courses, dropped as dropped_courses, avg_score, total_paid, health_status
+ from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+where s.student_id = student_id_input;
+end//
+delimiter ;
+
+
+set @total_courses =0;
+set @comp=0;
+set @dropped =0;
+set @avg_score =0.0;
+set @total_paid =0.0;
+set @health_status = "";
+call student_learn_health(2,@total_courses,@comp,@dropped,@avg_score,@total_paid,@health_status);
+select @total_courses,@comp,@dropped,@avg_score,@total_paid,@health_status;
+
+
 
 delimiter //
 create procedure get_student_learning_health(in student_id_input int, out total_courses int, out comp int,
