@@ -190,10 +190,77 @@ INSERT INTO Payments (payment_id, student_id, course_id, amount_paid, payment_da
 (926, 13, 1005, 130.43, '2023-06-05'),
 (927, 13, 1003, 171.07, '2023-03-19'),
 (928, 14, 1002, 140.56, '2023-04-05');
+
+#CTE Question
+-- Course-wise payment summary
+-- Using a CTE, calculate total payment received for each course.
+-- Expected columns:course_id,course_title,category,total_amount_received
+
+with course_info as 
+(
+	select 
+		c.course_id, 
+		c.title, c.category, 
+		coalesce(sum(p.amount_paid),0) as total_amt_receieved
+	 from courses as c 
+	left join payments as p on c.course_id = p.course_id
+	group by c.course_id,c.title, c.category
+)
+select * from course_info
+order by total_amt_receieved desc;
+
+#-------------------------------------------------------------------
+
+-- Running Total Payment by Student
+-- Show each payment with the student’s running total payment.
+-- Expected output:student_id,student_name,course_id,amount_paid,payment_date,running_total_payment
+
+select s.student_id, s.name, p.course_id, p.amount_paid, p.payment_date,
+sum(p.amount_paid) over (partition by s.student_id order by p.payment_date) as running_total_payment
+ from students as s
+left join payments as p on s.student_id = p.student_id;
+
+select s.student_id, s.name, p.course_id, p.amount_paid, p.payment_date,
+avg(p.amount_paid) over (partition by s.student_id order by p.payment_date) as running_total_payment
+ from students as s
+left join payments as p on s.student_id = p.student_id;
+
+select s.student_id, s.name, p.course_id, p.amount_paid, p.payment_date,
+count(p.amount_paid) over (partition by s.student_id order by p.payment_date) as running_total_payment
+ from students as s
+left join payments as p on s.student_id = p.student_id
+where p.amount_paid is not null;
+
+#--------------------------------------------------------------------
+-- City-wise Student Count Without GROUP BY
+-- Show every student and also show how many students are from that same city.
+-- Expected output:student_id,student_name,total_students_in_city
+
+select student_id,name, city,
+count(student_id) over (partition by city) as total_students_in_city
+ from students;
+
+
+
+
+
+#-----------------------------------------------------------------------
+
+-- Rank students by score in each course
+-- For every course, rank students based on their assessment score.
+
+select * from (select  course_id, student_id,date_taken,score,
+dense_rank() over (partition by course_id order by score desc) as student_rank
+ from assessments
+ where score is not null) as s
+ where student_rank = 1;
+
+
 #-----------------------------------------------------------------------------
 -- Question: Find Each Instructor’s Best Course by Average Score
 -- You need to show each instructor’s courses, average score per course, and rank courses inside each instructor.
 -- Expected outputinstructor_id,instructor_name,course_id,course_title,total_students,avg_score,course_rank,course_performance
+
 
 with instructor_info as 
 (
@@ -252,6 +319,21 @@ select * from assessments where course_id = 1001;
 -- Expected outputstudent_id,student_name,payment_id,course_id,amount_paid,payment_date,previous_payment_amount,payment_difference,
 -- payment_trend
 
+
+select 
+	s.student_id, s.name, p.payment_id,p.course_id,p.amount_paid,p.payment_date,
+	lag(p.amount_paid) over (partition by s.student_id order by p.payment_date) as prev_payment,
+	p.amount_paid - lag(p.amount_paid) over (partition by s.student_id order by p.payment_date) as pay_difference,
+	case
+		when lag(p.amount_paid) over (partition by s.student_id order by p.payment_date) is null then "first payment"
+		when p.amount_paid > lag(p.amount_paid) over (partition by s.student_id order by p.payment_date) then "increased pay"
+		when p.amount_paid < lag(p.amount_paid) over (partition by s.student_id order by p.payment_date) then "decreased pay"
+		when p.amount_paid = lag(p.amount_paid) over (partition by s.student_id order by p.payment_date) then "same"
+		end as pay_trend
+ from students as s 
+left join payments as p on s.student_id = p.student_id
+where p.amount_paid is not null;
+
 with student_pay_info as (
 select s.student_id, s.name,
 p.payment_id, p.course_id, p.amount_paid as current_payment, p.payment_date,
@@ -281,6 +363,30 @@ from student_pay_info;
 select * from students;
 select * from courses;
 
+with stud_info as 
+(
+	select 
+		s.city, s.student_id, s.name, 
+		avg(a.score) as avg_score 
+	from students as s
+	left join assessments as a on s.student_id = a.student_id
+	group by s.student_id, s.city,s.name
+),
+ranking as (
+	select *,
+		dense_rank() over (partition by city order by avg_score desc) as city_rank
+	 from stud_info
+     )
+select *,
+	case 
+		when city_rank = 1 and avg_score >= 80  then 'City Top Performer'
+		when city_rank = 1 and avg_score < 80 then 'City Top but Needs Improvement'
+		when city_rank = 2 then 'Second Best in City'
+		when city_rank > 2 then 'Other Student'
+		when avg_score is null then 'No Assessment'
+		end as performance_status
+    from ranking;
+    
 with stud_info as
 (
 	select 
@@ -376,7 +482,38 @@ from ranking;
 -- Create a query to find courses whose average score is below the overall platform average score.
 -- Expected output
 -- course_id | course_title | course_avg_score | platform_avg_score | total_students | performance_status
+select * from enrollments where course_id = 1002;
 
+with course_info as (
+	select 
+		c.course_id, c.title,
+		count(distinct e.student_id) as total_students,
+		avg(a.score) as course_avg_score
+	 from courses as c
+	 left join enrollments as e on e.course_id = c.course_id
+	left join assessments as a on c.course_id = a.course_id
+	group by c.course_id
+),
+platform_score as
+(
+	select avg(score) as platform_avg_score 
+	from assessments
+)
+select *,
+case 
+	when c.course_avg_score IS NULL
+    then 'No Assessment Data'
+	when c.course_avg_score < p.platform_avg_score
+    then 'Below Platform Average'
+	when c.course_avg_score = p.platform_avg_score
+    then 'Equal to Platform Average'
+	when c.course_avg_score > p.platform_avg_score
+    then 'Above Platform Average'
+    end as performance_status
+    from course_info as c
+cross join platform_score as p;
+
+#-----------------
 with course_info as 
 (
 	select 
