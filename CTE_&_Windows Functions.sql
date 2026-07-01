@@ -190,6 +190,600 @@ INSERT INTO Payments (payment_id, student_id, course_id, amount_paid, payment_da
 (926, 13, 1005, 130.43, '2023-06-05'),
 (927, 13, 1003, 171.07, '2023-03-19'),
 (928, 14, 1002, 140.56, '2023-04-05');
+#----------------------------------------------------------------
+-- CTE Question
+-- Instructor Performance Report
+-- Find how each instructor is performing based on courses, enrollments, revenue, and average score.
+-- Expected output:instructor_id,instructor_name,expertise,total_courses,total_enrollments,total_revenue,avg_student_score,
+-- instructor_status
+select * from instructors;
+
+with pay_summary as
+(
+	select 
+		i.instructor_id,i.name,i.expertise,
+		coalesce(sum(p.amount_paid),0) as total_revenue
+	 from courses as c
+	join instructors as i on c.instructor_id = i.instructor_id
+	join payments as p on p.course_id = c.course_id
+	group by i.instructor_id,i.name,i.expertise
+),
+enroll_info as (
+select 
+		i.instructor_id,i.name,i.expertise,
+		count(e.student_id) as total_enrollments
+	 from courses as c
+	join instructors as i on c.instructor_id = i.instructor_id
+	join enrollments as e on e.course_id = c.course_id
+	group by i.instructor_id,i.name,i.expertise
+),
+stud_info as
+(
+	select 
+		i.instructor_id, i.name,i.expertise,
+		 count(distinct c.course_id) as total_courses,
+		 coalesce(avg(a.score),0) as avg_student_score,
+		 p.total_revenue,
+         e.total_enrollments
+	 from instructors as i
+	left join courses as c on i.instructor_id = c.instructor_id
+	left join assessments as a on a.course_id = c.course_id
+    left join enroll_info as e on e.instructor_id = i.instructor_id
+	left join pay_summary as p on p.instructor_id = i.instructor_id
+	group by i.instructor_id, i.name,i.expertise
+)
+select *,
+case 
+	when total_courses = 0 then 'No Courses Assigned'
+	when total_revenue >= 500 and avg_student_score >= 75 then 'Top Instructor'
+	when total_enrollments >= 3 and avg_student_score >= 60 then 'Good Instructor'
+	when avg_student_score < 60 then 'Needs Improvement'
+	else 'Average Instructor' 
+    end as instructor_status
+from stud_info;
+
+select * from enrollments where course_id in (1006, 1003);
+select i.instructor_id, sum(p.amount_paid)
+ from courses as c
+join instructors as i on c.instructor_id = i.instructor_id
+join payments as p on p.course_id = c.course_id
+group by i.instructor_id;
+
+select 
+		i.instructor_id,i.name,i.expertise,
+		count(e.student_id) as total_enrollments
+	 from courses as c
+	join instructors as i on c.instructor_id = i.instructor_id
+	join enrollments as e on e.course_id = c.course_id
+	group by i.instructor_id,i.name,i.expertise;
+#----------------------------------------------------------------
+-- CTE Question
+-- Student Learning Consistency Report
+-- Find students who have taken assessments and classify their learning consistency.
+-- Expected output:student_id,student_name,city,total_assessments,courses_attempted,highest_score,lowest_score,
+-- avg_score,score_gap,performance_status
+
+with stud_info as 
+(
+	select 
+		s.student_id, s.name, s.city, 
+		count(a.assessment_id) as total_assessments,
+		count(distinct a.score) as courses_attempted,
+		max(score) as highest_score, 
+		min(score) as lowest_score,
+		avg(a.score) as avg_score
+	 from students as s
+	left join assessments as a on s.student_id = a.student_id
+	group by s.student_id,s.name,s.city
+)
+select *,
+	highest_score - lowest_score as score_gap,
+	case 
+		when avg_score >= 80 and highest_score - lowest_score <= 10  then 'Consistent High Performer'
+		when avg_score >= 70 and highest_score - lowest_score > 10 then 'Good but Inconsistent'
+		when avg_score >= 60 then 'Average Performer'
+		when avg_score < 60 then 'Needs Improvement'
+		else 'No Assessment'
+	end as performance_status
+from stud_info;
+
+select avg(score) from assessments 
+where score is not null and student_id =4 ;
+
+select * from assessments where student_id =1 ;
+
+#--------------------------------------------------------------
+
+-- Student Score Improvement Report
+-- Find each student’s assessment score history and compare it with their previous score.
+-- Expected output:student_id,course_id,course_title,date_taken,score,previous_score,score_difference,performance_trend
+select * from assessments;
+
+with student_data as 
+(
+	select 
+		s.student_id,
+		a.course_id, c.title,
+		a.date_taken,
+		a.score as current_score,
+		lag(score) over (partition by s.student_id order by a.date_taken asc) as previous_score
+	from students as s
+	left join assessments as a on s.student_id = a.student_id
+	left join courses as c on a.course_id = c.course_id
+)
+select *,
+	current_score - previous_score as score_difference,
+	case 
+		when current_score is null then 'assessment not attempted'
+		when previous_score is null then 'First Assessment'
+		when current_score > previous_score then 'Improved'
+		when current_score < previous_score then 'Declined'
+		when current_score = previous_score then 'Same'
+	end as status
+ from student_data;
+
+
+#----------------------------------------------------------------
+-- CTE Question: Student Course Gap Analysis
+-- Find students who are enrolled in courses but have some kind of missing/incomplete activity.
+-- Expected output: student_id,student_name,course_id,course_title,enroll_date,enrollment_status,assessment_status,
+-- payment_status,gap_type
+select * from enrollments;
+select * from assessments;
+select * from payments;
+with pay_status as
+(
+select student_id, course_id, 
+count(payment_id)  as payment_records,
+sum(amount_paid) as total_amount_paid
+ from payments 
+group by student_id, course_id),
+student_data as 
+(
+	select 
+		s.student_id, s.name, 
+		c.course_id, c.title,
+        c.price,
+		e.enroll_date, e.status,
+		a.assessment_id,
+		a.score ,
+		p.payment_records,
+		p.total_amount_paid
+	 from students as s
+	left join enrollments as e on s.student_id = e.student_id
+	left join courses as c on e.course_id = c.course_id
+	left join assessments as a on e.course_id = a.course_id and e.student_id = a.student_id
+	left join pay_status as p on e.course_id = p.course_id and e.student_id = p.student_id
+    ),
+pay_assess_status as
+(select * ,
+	case 
+		when assessment_id is null then 'Assessment Missing'
+		when score IS NULL then 'Assessment Not Attempted'
+		when score < 60 then 'Low Score'
+		else 'Assessment OK'
+	end as assessment_status,
+    case 
+		when payment_records is null then 'Payment Missing'
+		when total_amount_paid is null then 'Payment Not Done'
+		when total_amount_paid < price then 'Partial Payment'
+		when total_amount_paid >= price then 'Payment Complete'
+    end as payment_status
+ from student_data)
+ select * ,
+ case 
+	 when assessment_status in ('Assessment Missing','Assessment Not Attempted') and
+	 payment_status in ('Payment Missing','Payment Not Done') then "Both Assessment and Payment Gap"
+     when assessment_status in ('Assessment Missing','Assessment Not Attempted', 'Low Score') 
+     then "assessment gap"
+     when payment_status in ('Payment Missing', 'Payment Not Done', 'Partial Payment')
+     then "payment gap"
+     else 'no gap'
+ end as gap_type
+ from pay_assess_status;
+
+#-----------------------------------------------------------------
+-- Window Function Question
+-- Student Payment Ranking Within City
+-- Rank students inside each city based on total amount paid.
+-- Expected output:city,student_id,student_name,total_paid,city_payment_rank,city_total_payment,payment_share_percent
+
+with stud_info as
+(
+	select 
+		s.city, s.student_id, s.name,
+		sum(p.amount_paid) as total_paid
+	 from students as s
+	left join payments as p on s.student_id = p.student_id
+	group by s.city,s.student_id,s.name
+)
+select *,
+	dense_rank() over 
+    (
+		partition by city 
+		order by total_paid desc
+    ) as city_payment_rank,
+	sum(total_paid) over 
+    (
+		partition by city
+    ) as city_total_payment,
+	total_paid/sum(total_paid) over (partition by city) * 100 as payment_share_percent
+ from stud_info
+ order by city_total_payment desc;
+
+
+#-------------------------------------------------------------------
+-- CTE Question: Student Course Completion Risk Report
+-- Create a CTE-based query to find each student’s learning risk.
+-- Expected output:student_id,student_name,total_courses,completed_courses,dropped_courses,avg_score,
+-- total_paid,risk_status
+
+with stud_info as (
+select 
+	s.student_id, s.name, 
+	count(distinct e.course_id) as total_courses,
+	count(case when e.status = 'completed' then 1 end) as completed_courses,
+	count(case when e.status ="dropped" then 1 end) as dropped_courses,
+	round(coalesce(avg(a.score),0),2) as avg_score
+ from students as s
+left join enrollments as e on s.student_id = e.student_id
+left join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+group by s.student_id,s.name),
+pay_info as
+(
+	select 
+		s.student_id, s.name, 
+		coalesce(sum(p.amount_paid),0) as total_paid
+	 from students as s
+	left join payments as p on s.student_id =p.student_id
+    group by s.student_id, s.name
+)
+select 
+	s.student_id,s.name,s.total_courses,
+	s.completed_courses,s.dropped_courses,s.avg_score,
+	p.total_paid,
+	case 
+		when total_courses = 0 then 'Inactive Student'
+		when dropped_courses >= 2 then  'High Risk'
+		when completed_courses >= 2 AND avg_score >= 75 then 'Strong Learner'
+		when avg_score < 60 then 'Needs Support'
+		else 'Normal'
+	end as risk_status
+ from stud_info as s
+join pay_info as p on s.student_id = p.student_id;
+
+select * from enrollments where student_id = 2;
+select * from assessments where student_id =1;
+select sum(amount_paid) from payments where student_id =1;
+select 466+195;
+
+#-----------------------------------------------------------------------------
+-- Window Function Question
+-- Monthly Payment Running Report
+-- Show monthly payment revenue and running revenue month by month.
+-- Expected output:payment_month,monthly_revenue,previous_month_revenue,revenue_difference,revenue_trend
+select * from payments;
+
+with month_data as
+(
+	select 
+		date_format(payment_date, '%Y-%m') as payment_month, 
+		sum(amount_paid)  as monthly_revenue
+	 from payments
+     where amount_paid is not null
+	 group by payment_month
+	 order by payment_month
+ ),
+ prev_pay as
+ (
+	select *,
+    sum(monthly_revenue) over (order by payment_month) as total_ruuning_revenue,
+		lag(monthly_revenue) over (order by payment_month) as previous_month_revenue
+	from month_data
+)
+select *,
+	monthly_revenue - previous_month_revenue as revenue_difference,
+		case 
+			when previous_month_revenue is null then 'First Month'
+			when monthly_revenue > previous_month_revenue then  'Increased'
+			when monthly_revenue < previous_month_revenue then  'Decreased'
+			when  monthly_revenue = previous_month_revenue then 'Same'
+		end as revenue_trend
+ from prev_pay;
+
+
+select date_format(payment_date, '%Y-%m') as payment_month, 
+sum(amount_paid)  as monthly_revenue
+ from payments
+ group by payment_month;
+
+
+
+#--------------------------------------------------------------------------
+-- CTE Question
+-- Student Payment Completion Report
+-- Create a CTE to calculate each student’s payment completion status.
+-- Expected output:student_id,student_name,total_courses_enrolled,total_course_price,total_amount_paid,pending_amount,
+-- payment_status
+
+with stud_info as 
+(
+	select s.student_id, s.name, s.city,
+		count(distinct e.course_id) as total_courses_enrolled,
+		coalesce(sum(c.price),0) as total_course_price
+	 from students as s
+	left join enrollments as e on s.student_id = e.student_id
+	left join courses as c on c.course_id = e.course_id
+	group by s.student_id, s.name, s.city
+),
+payment_summary as
+(
+select 
+	student_id, 
+	coalesce(sum(amount_paid),0) as total_amount_paid
+ from payments 
+group by student_id
+)
+	select *,
+    s.total_course_price - p.total_amount_paid as pending_amount,
+		case 
+			when p.total_amount_paid = 0  then 'No Payment'
+			when p.total_amount_paid < s.total_course_price then 'Partial Payment'
+			when p.total_amount_paid >= s.total_course_price then 'Fully Paid'
+			end as pay_status
+    from stud_info as s
+    left join payment_summary as p on s.student_id = p.student_id;
+
+select * from enrollments where student_id =2;
+select * from payments where student_id = 2;
+select * from courses ;
+
+#-----------------------------------------------------------------------
+-- 2. Window Function Question
+-- Course-wise Student Score Ranking
+-- Rank students inside each course based on their assessment score.
+-- Expected output:course_id,course_title,student_id,student_name,score,course_rank,score_difference_from_top
+with course_info as 
+(
+	select 
+		c.course_id, c.title,s.student_id,s.name,a.score,
+		dense_rank() over 
+        (
+			partition by c.course_id,c.title 
+			order by a.score desc
+        ) as course_rank_score
+	 from courses as c
+	left join assessments as a on c.course_id = a.course_id
+	 join students as s on s.student_id = a.student_id
+	 where score is not null
+ ),
+ ranking as 
+ (
+	 select 
+		 course_id,
+		 max(score) as top_score
+	 from course_info
+     group by course_id,title
+ )
+	 select *,
+		r.top_score-c.score as difference_from_top
+	 from course_info as c
+	 join ranking as r on c.course_id = r.course_id;
+
+ select c.course_id, c.title,s.student_id,s.name,a.score,
+dense_rank() over (partition by c.course_id,c.title order by a.score desc) as course_rank_score
+ from courses as c
+left join assessments as a on c.course_id = a.course_id
+ join students as s on s.student_id = a.student_id
+ where score is not null;
+
+
+
+
+#---------------------------------------------------------------------------
+-- CTE Question
+-- Monthly Course Revenue Performance Report
+-- Create a query that shows monthly revenue performance for each course.
+-- You need to calculate:course_id,course_title,payment_month,running_course_revenue,course_total_revenue,
+-- monthly_revenue_rank,revenue_status
+
+with course_info as 
+(
+	select 
+		c.course_id, c.title,sum(p.amount_paid) as monthly_revenue,
+		date_format(p.payment_date, '%Y-%m') as payment_month
+	 from courses as c
+	left join payments as p on c.course_id = p.course_id
+	where p.amount_paid is not null
+    group by c.course_id, c.title, payment_month
+    order by c.course_id, c.title, payment_month asc
+),
+running_rev as 
+(
+	select *,
+		sum(monthly_revenue) over (partition by course_id order by payment_month) as running_course_revenue,
+		dense_rank() over (partition by course_id order by monthly_revenue desc) as monthly_revenue_rank
+ from course_info
+ ),
+ course_paid as
+ (
+	 select 
+		c.course_id,c.title, sum(p.amount_paid) course_total_revenue
+	 from courses as c
+	left join payments as p on c.course_id = p.course_id
+	where p.amount_paid is not null
+	group by c.course_id,c.title
+)
+	select 
+		cp.course_id, r.title, r.payment_month, r.monthly_revenue,
+		cp.course_total_revenue,
+		 r.running_course_revenue,
+         r.monthly_revenue_rank,
+         case
+			when monthly_revenue >= 300 then 'High Revenue Month'
+			when monthly_revenue >= 150 then 'Medium Revenue Month'
+			when monthly_revenue > 0 then 'Low Revenue Month'
+			else 'No Revenue'
+			end as revenue_status
+	 from course_paid as cp
+	join running_rev as r on cp.course_id = r.course_id
+    order by cp.course_id;
+
+
+create view course_info as
+select 
+    c.course_id, c.title,sum(p.amount_paid) as monthly_revenue,
+	date_format(p.payment_date, '%Y-%m') as payment_month
+	 from courses as c
+	left join payments as p on c.course_id = p.course_id
+	where p.amount_paid is not null
+    group by c.course_id, c.title, payment_month
+    order by c.course_id, c.title, payment_month asc;
+    
+    select * from course_info;
+    
+create view course_paid as 
+select c.course_id, sum(p.amount_paid) course_total_revenue
+ from courses as c
+left join payments as p on c.course_id = p.course_id
+where p.amount_paid is not null
+group by c.course_id;
+
+select * from course_paid;
+
+select * from course_info as c
+join course_paid as cp on c.course_id = cp.course_id;
+
+select * from course_info;
+
+select *,
+sum(monthly_revenue) over (partition by course_id order by payment_month) as running_course_revenue
+ from course_info;
+    
+
+#----------------------------------------------------------------------
+-- 1. CTE + CASE Question
+-- Course Completion & Payment Quality Report
+-- Create a CTE that calculates course-wise:course_id,total_enrollments,completed_count,dropped_count,avg_score,
+-- total_revenue,course_quality_status
+
+with course_data as 
+(
+	select 
+		c.course_id,
+		count(distinct e.student_id) as total_enrollments,
+		count(distinct case when e.status ="completed" then e.enrollment_id end) as completed,
+		count(distinct case when e.status ="dropped" then e.enrollment_id end) as dropped,
+        count(distinct case when e.status ="in-progress" then e.enrollment_id end) as inprog,
+		round(coalesce(avg(a.score),0),2) as avg_score,
+        coalesce(sum(p.amount_paid),0) as total_revenue
+	 from courses as c
+	left join enrollments as e on c.course_id = e.course_id
+	left join assessments as a on e.course_id = a.course_id and e.student_id = a.student_id
+    left join payments as p on e.course_id = p.course_id and e.student_id = p.student_id
+	group by c.course_id
+)
+	select *,
+		case 
+		when total_enrollments = 0 then 'No Enrollments'
+		when dropped >= 2 then 'High Drop Risk'
+		when completed >= 2 and avg_score >= 75 and total_revenue >= 300 then 'Strong Course'
+		when avg_score < 60 then 'Low Performance'
+		else 'Average Course' 
+		end as course_quality_check
+    from course_data
+    order by total_revenue desc;
+
+select * from enrollments where course_id = 1002;
+
+select avg(score) from assessments where course_id = 1005;
+
+
+
+
+#----------------------------------------------------------------------
+-- 1. CTE Question
+-- Student Learning Summary
+-- Create a CTE that calculates each student’s:total_courses_enrolled,completed_courses,avg_score,total_amount_paid
+-- Expected output:student_id,student_name,city,total_courses_enrolled,completed_courses,avg_score,total_amount_paid
+select * from enrollments where student_id = 1;
+
+with enrollment_info as 
+(
+	select 
+		s.student_id,s.name,s.city,
+		count(e.course_id) as total_enrolled_courses,
+		count(case when e.status ="completed" then 1 end) as completed_courses
+	 from students as s
+	left join enrollments as e on s.student_id = e.student_id
+	group by s.student_id,s.name,s.city
+),
+assess_info as
+(
+	select 
+		s.student_id,s.name,s.city,
+		avg(a.score) as avg_score,
+		sum(distinct p.amount_paid) as total_amt_paid
+	from students as s
+	left join assessments as a on s.student_id = a.student_id
+	left join payments as p on s.student_id = p.student_id 
+    where a.score is not null
+	group by s.student_id, s.name,s.city
+)
+select
+	 e.student_id,e.name,e.city,
+	 e.total_enrolled_courses,e.completed_courses,
+	 a.avg_score,a.total_amt_paid
+ from enrollment_info as e
+join assess_info as a on e.student_id = a.student_id;
+
+#-------------------------------------------------
+with student_summary as(
+select 
+		s.student_id,s.name,s.city,
+		count(e.course_id) as total_enrolled_courses,
+		count(case when e.status ="completed" then 1 end) as completed_courses,
+        avg(a.score),
+        sum(p.amount_paid)
+	 from students as s
+	left join enrollments as e on s.student_id = e.student_id
+    left join assessments as a on e.student_id = a.student_id and e.course_id = a.course_id
+    left join payments as p on e.student_id = p.student_id and e.course_id = p.course_id
+	group by s.student_id,s.name,s.city)
+    select * from student_summary;
+
+
+select p.student_id, sum(p.amount_paid) from payments as p
+join students as s on p.student_id = s.student_id
+group by p.student_id;
+#-------------------------------------------------------------------
+
+-- 2. Window Function Question
+-- Running Course Revenue by Payment Date
+-- Show every payment row and calculate running revenue for each course.
+-- Expected output:course_id,course_title,payment_id,student_id,amount_paid,payment_date,running_course_revenue,payment_count_so_far
+
+-- ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+-- It means:
+-- Start from the first row of that course and calculate up to the current row.
+
+select 
+	c.course_id, c.title,p.payment_id,
+	p.student_id,p.amount_paid,p.payment_date,
+	sum(p.amount_paid) over (partition by c.course_id order by p.payment_date,p.payment_id
+	rows between unbounded preceding and current row) 
+    as running_course_revenue,
+	avg(p.amount_paid) over (partition by c.course_id order by p.payment_date,p.payment_id
+	rows between unbounded preceding and current row) 
+    as avg_running_course_revenue,
+	count(p.amount_paid) over (partition by c.course_id order by p.payment_date,p.payment_id
+	rows between unbounded preceding and current row) 
+    as count_running_course_revenue
+ from courses as c
+left join payments as p on c.course_id = p.course_id
+where p.amount_paid is not null;
+
+#----------------------------------------------------------------------
 
 #CTE Question
 -- Course-wise payment summary
