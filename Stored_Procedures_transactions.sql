@@ -28,6 +28,469 @@ select * from courses;
 -- Example question:
 -- Show all payments between two dates.
 -- Answer is a table/list:
+#---------------------------------------------------------------------------------
+-- Stored Procedure Question: add_assessment_score_safe
+-- Create a procedure to safely add an assessment score for a student-course.
+-- Example:
+-- CALL add_assessment_score_safe(5, 1003, 82.50);
+-- Task
+-- Insert a new row into Assessments:
+-- Validations
+-- 1. Student must exist
+-- 2. Course must exist
+-- 3. Student must be enrolled in that course
+-- 4. Dropped course cannot have assessment
+-- Error:Dropped course cannot have assessment
+-- 5. Score cannot be NULL
+-- Error:Score cannot be null
+-- 6. Score must be between 0 and 100
+-- Error:Score must be between 0 and 100
+
+delimiter //
+create procedure add_assessment_score_safe(in student_id_input int, in course_id_input int, in p_score decimal(10,2))
+begin
+
+declare p_status varchar(100);
+
+declare exit handler for sqlexception
+begin
+	rollback;
+    resignal;
+end;
+
+start transaction;
+if not exists(select 1 from students
+where student_id = student_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student does not exists';
+end if;
+
+if not exists(select 1 from courses
+where course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='course does not exists';
+end if;
+
+if not exists(select 1 from enrollments
+where course_id = course_id_input and student_id = student_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student not enrolled';
+end if;
+
+select status into p_status from enrollments
+where course_id = course_id_input and student_id = student_id_input;
+
+if p_status ='dropped' then 
+	signal sqlstate '45000'
+    set message_text ='dropped course cannot have assessments';
+end if;
+
+if p_score is null then
+	signal sqlstate '45000'
+    set message_text ='score shud not be null';
+end if;
+
+if p_score > 100 or p_score < 0 then
+	signal sqlstate '45000'
+    set message_text ='score shud be between 0 and 100';
+end if;
+
+insert into assessments (student_id, course_id, score, date_taken) values
+(student_id_input, course_id_input, p_score, curdate());
+commit;
+
+select 'assessmne added succesfully' as message,
+student_id_input as student_id, course_id_input as course_id , p_score as score, curdate() as date_taken,
+case 
+	when p_score >= 80 then 'Excellent'
+	when p_score >= 60 then 'Passed'
+	when p_score < 60 then'Failed'
+	end as assessment_status;
+end//
+delimiter ;
+
+call add_assessment_score_safe(1,1006,101);
+
+select * from assessments;
+#---------------------------------------------------------------------------------
+-- Stored Procedure Question
+-- enroll_student_with_initial_payment_safe
+-- Create a procedure to enroll a student into a course and optionally take an initial payment.
+-- Example:
+-- CALL enroll_student_with_initial_payment_safe(5, 1003, 200.00);
+-- Task
+-- Insert a new row into Enrollments.
+-- If initial_payment_input > 0, insert a row into Payments.
+-- Validations
+-- 1. Student must exist
+-- 2. Course must exist
+-- 3. Student should not already be enrolled in that course
+-- 4. Initial payment cannot be negative
+-- Error:Initial payment cannot be negative
+-- 5. Initial payment cannot be greater than course price
+-- Error:Initial payment cannot exceed course price
+
+delimiter //
+create procedure enroll_student_with_initial_payment_safe(in student_id_input int, in course_id_input int,
+ in initial_payment decimal(10,2))
+begin
+declare p_course_price decimal(10,2);
+declare pending_amount decimal(10,2);
+
+declare exit handler for sqlexception
+begin	
+	rollback;
+    resignal;
+end;
+
+start transaction;
+
+if not exists (select 1 from students
+where student_id = student_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student does not exists';
+end if;
+
+if not exists (select 1 from courses
+where course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='course does not exists';
+end if;
+
+if exists (select 1 from enrollments
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student already enrolled';
+end if;
+
+if initial_payment < 0 then
+	signal sqlstate '45000'
+    set message_text = 'initial payment cannot be negative';
+end if;
+
+select price into p_course_price
+ from courses
+where course_id = course_id_input;
+
+if initial_payment > p_course_price then 
+	signal sqlstate '45000'
+    set message_text =' initial pay cannot be greater than course price';
+end if;
+
+set pending_amount = initial_payment - p_course_price;
+
+insert into enrollments (student_id, course_id, enroll_date, status) values
+(student_id_input, course_id_input, curdate(), 'active');
+
+if initial_payment > 0 then 
+insert into payments(student_id, course_id,amount_paid, payment_date) values
+(student_id_input, course_id_input, initial_payment ,curdate());
+end if;
+
+commit;
+select 'Student enrolled successfully' as message,
+student_id_input as student_id,
+course_id_input as course_id,
+p_course_price as course_price,
+initial_payment as  initial_payment,
+pending_amount as pending_amount,
+'active' as enrollment_status;
+end//
+delimiter ;
+
+drop procedure if exists enroll_student_with_initial_payment_safe;
+
+call enroll_student_with_initial_payment_safe(1, 1004, 56);
+select * from enrollments;
+
+
+select * from payments;
+
+
+
+
+
+#----------------------------------------------------------------------------------
+-- Stored Procedure Question
+-- Create a procedure that safely marks a student’s course as completed only if they are eligible.
+-- Example:
+-- CALL complete_course_if_eligible_safe(8, 1002);
+-- Expected task
+-- Update Enrollments.status to:
+-- 'completed'
+-- Validations
+-- 1. Student must exist
+-- 2. Course must exist
+-- 3. Enrollment must exist
+-- 4. If course already completed
+-- Error:Course already completed
+-- 5. If course is dropped
+-- Error:Dropped course cannot be completed
+-- 6. Student must have an assessment score for that course
+-- Error:Assessment not found
+-- 7. Score must be at least 60
+-- Error:Score too low to complete course
+-- 8. Student must have fully paid the course fee
+-- Calculate:course_price,total_paid
+-- pending_amount = course_price - total_paid
+-- If total_paid < course_price, 
+-- error:
+-- Payment pending, course cannot be completed
+
+delimiter //
+create procedure complete_course_if_eligible_safe(in student_id_input int, in course_id_input int)
+begin
+declare p_status varchar(100);
+declare p_score decimal(10,2);
+declare c_price decimal(10,2);
+declare p_amount_paid decimal(10,2);
+declare pending_amount decimal(10,2);
+
+declare exit handler for sqlexception
+begin
+	rollback;
+    resignal;
+end;
+
+start transaction;
+if not exists (select 1 from students 
+where student_id = student_id_input )then
+	signal sqlstate '45000'
+    set message_text='student does not exists';
+end if;
+
+if not exists(select 1 from courses
+where course_id = course_id_input) then
+	signal sqlstate '45000'
+    set message_text = 'course does not exists';
+end if;
+
+if not exists (select 1 from enrollments 
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student not enrolled';
+end if;
+
+select status into p_status from enrollments
+where student_id = student_id_input and course_id = course_id_input;
+
+if p_status ='completed' then 
+	signal sqlstate '45000'
+    set message_text ='course already completed';
+end if;
+
+if p_status ='dropped' then 
+	signal sqlstate '45000'
+    set message_text ='dropped status cannpt be chnaged to completed';
+end if;
+
+-- 6. Student must have an assessment score for that course
+if not exists (select 1 from assessments
+where student_id = student_id_input and course_id = course_id_input) then
+	signal sqlstate '45000'
+	set message_text ='assessment not found';
+end if;
+
+select score into p_score from assessments 
+where student_id = student_id_input and course_id = course_id_input;
+
+if p_score < 60 or p_score is null then 
+	signal sqlstate '45000'
+    set message_text =' score below 60 or null cannot be completed';
+end if;
+
+select price into c_price from courses
+where course_id = course_id_input;
+
+select coalesce(sum(amount_paid),0) into p_amount_paid from payments 
+where student_id = student_id_input and course_id = course_id_input ;
+
+set pending_amount = c_price-p_amount_paid;
+
+if p_amount_paid < c_price then
+	signal sqlstate '45000'
+    set message_text ='Payment pending, course cannot be completed';
+end if;
+
+update enrollments set status ='completed'
+where student_id = student_id_input and course_id = course_id_input;
+
+commit;
+select 'status changed to completed successfully' as message;
+end//
+delimiter ;
+
+select * from enrollments;
+select * from assessments;
+
+call complete_course_if_eligible_safe(13,1001);
+#-----------------------------------------------------------------------------------
+-- Stored Procedure Question:drop_student_from_course_safe
+-- Create a stored procedure to safely mark a student’s enrollment as dropped.
+-- Example:
+-- CALL drop_student_from_course_safe(1, 1006);
+-- Expected task
+-- Update the Enrollments table:
+-- status = 'dropped'
+-- for that student and course.
+-- Validations
+-- Before updating:
+-- 1. Student must exist
+-- 2. Course must exist
+-- 3. Enrollment record must exist
+-- 4. If status is already dropped
+-- Error message:
+-- Course already dropped
+-- 5. If status is completed, do not allow dropping
+-- Error message:
+-- Completed course cannot be dropped
+
+delimiter //
+create procedure drop_student_from_course_safe(in student_id_input int, in course_id_input int)
+begin
+
+declare p_status varchar(100);
+
+declare exit handler for sqlexception
+begin
+	rollback;
+    resignal;
+end;
+start transaction;
+
+if not exists(select 1 from students
+where student_id = student_id_input) then
+	signal sqlstate '45000'
+    set message_text = 'student does not exists';
+end if;
+
+if not exists(select 1 from courses
+where course_id = course_id_input) then
+	signal sqlstate '45000'
+    set message_text = 'course does not exists';
+end if;
+
+if not exists (select 1 from enrollments 
+where student_id = student_id_input and course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student not enrolled';
+end if;
+
+select status into p_status from enrollments
+where student_id = student_id_input and course_id = course_id_input;
+
+if p_status = 'dropped' then 
+	signal sqlstate '45000'
+    set message_text ='already dropped';
+end if;
+
+if p_status = 'completed' then 
+	signal sqlstate '45000'
+    set message_text ='completed status course cannot be dropped';
+end if;
+
+update enrollments set status ='dropped'
+where student_id = student_id_input and course_id = course_id_input;
+
+commit;
+select "course drooped succefully" as message;
+end//
+delimiter ;
+
+select * from enrollments;
+CALL drop_student_from_course_safe(1, 1005);
+
+
+
+
+#----------------------------------------------------------------------------------
+-- Stored Procedure Question
+-- update_enrollment_status_safe
+-- Create a stored procedure to safely update a student’s enrollment status for a course.
+-- Example:
+-- CALL update_enrollment_status_safe(1, 1006, 'completed');
+-- Expected task:Update the status in Enrollments table.
+-- Validations
+-- Before updating:
+-- 1. Student must exist
+-- 2. Course must exist
+-- 3. Student must be enrolled in that course
+-- 4. New status must be valid
+-- Allowed statuses:completed,in-progress,dropped
+-- If invalid:
+-- Invalid enrollment status
+-- 5. If current status is already completed, do not allow changing it to dropped
+-- If someone tries:
+-- CALL update_enrollment_status_safe(1, 1006, 'dropped');
+-- and current status is already completed, show:
+-- Completed course cannot be marked as dropped
+
+delimiter //
+create procedure update_enrollments_status_safe(in student_id_input int, in course_id_input int,
+in new_status varchar(50))
+begin
+declare p_status varchar(50);
+
+declare exit handler for sqlexception
+begin
+	rollback;
+	resignal;
+end;
+start transaction;
+
+if not exists(select 1 from students
+where student_id = student_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='student does not exists';
+end if;
+
+if not exists(select 1 from courses
+where course_id = course_id_input) then 
+	signal sqlstate '45000'
+    set message_text ='course does not exists';
+end if;
+
+-- 3. Student must be enrolled in that course
+if not exists (select 1 from enrollments
+where student_id = student_id_input and course_id = course_id_input) then
+	signal sqlstate '45000'
+    set message_text ='student not enrolled';
+end if;
+
+-- 4 New status must be valid
+-- Allowed statuses:completed,in-progress,dropped
+-- If invalid:
+-- Invalid enrollment status
+
+if new_status not in ('completed', 'dropped','in-progress') then
+	signal sqlstate '45000'
+    set message_text ='invalid enrollment status';
+end if;
+
+-- 5. If current status is already completed, do not allow changing it to dropped
+-- If someone tries:
+select status into p_status from enrollments
+where student_id = student_id_input and course_id = course_id_input;
+
+if p_status = 'completed' and new_status = 'dropped'  then 
+	signal sqlstate '45000'
+    set message_text ='completed course cannot be dropped';
+end if;
+
+ update enrollments set status = new_status 
+ where student_id = student_id_input and course_id = course_id_input;
+commit;
+select 'enrollment updated successfully' as message;
+
+end//
+delimiter ;
+
+call update_enrollments_status_safe(1,1006,'dropped');
+select * from enrollments;
+
+
+
+
 #--------------------------------------------------------------------------------
 -- Stored Procedure Question: make_course_payment
 -- Create a stored procedure that records a student’s payment for a course.
